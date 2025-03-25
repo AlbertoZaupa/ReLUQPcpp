@@ -30,7 +30,7 @@ public:
         float* u_, float* eigs_);
     ~Solver();
     void solve();
-    void setup();
+    void setup(float abs_tol_, int max_iter_, int check_interval_);
     void update(const float* g, const float* l, const float* u, float rho_);
     std::vector<float> get_results();
     float solve_time = 0;
@@ -44,6 +44,9 @@ private:
     Matrix TtAtMA, TtAtM, TtAt, Tt, At, AT, MA, AtM;
     cublasHandle_t handle;
     float rho;
+    float abs_tol = 1e-3;
+    int max_iter = 4000;
+    int check_interval = 25;
 
     void compute_matrices();
     void forward_pass();

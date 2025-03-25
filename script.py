@@ -1,5 +1,5 @@
 import numpy as np
-from solver_wrapper import PySolver
+from solver_wrapper import CppSolver
 
 # Example data (must be of type np.float32 and contiguous)
 nx = 3
@@ -18,7 +18,7 @@ u = np.array([3, 0, np.inf, np.inf, np.inf], dtype=np.float32)
 eigs = np.array([0.230738285, 288.861322, 543.016374], dtype=np.float32)
 
 # Create a PySolver instance
-solver = PySolver(rho, nx, nc, H, A, T, M, M_inv, g, l, u, eigs)
+solver = CppSolver(rho, nx, nc, H, A, T, M, M_inv, g, l, u, eigs)
 
 # Solve the problem
 solver.setup()

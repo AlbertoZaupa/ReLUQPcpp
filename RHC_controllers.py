@@ -3,17 +3,14 @@ import torch
 import scipy
 import scipy.sparse as sparse
 from reluqp import ReLU_QP
-from solver_wrapper import PySolver
+from solver_wrapper import CppSolver
 import osqp
 from scipy.linalg import eigh
 
 class RHC_controller():
     
-    def __init__(self, x0, A, B, Q, R, Pf, N, Ex, dx, cx, Eu, du, cu, Ef, df, cf):
-        # Computation of the infinite horizon LQR solution
-        P = scipy.linalg.solve_discrete_are(A, B, Q, R)
-        self.K = np.linalg.inv(R + B.T @ P @ B) @ (B.T @ P @ A)
-
+    def __init__(self, x0, A, B, K, Q, R, Pf, N, Ex, dx, cx, Eu, du, cu, Ef, df, cf):
+        self.K = K
         self.condense(A, B, Q, R, Pf, N, Ex, dx, cx, Eu, du, cu, Ef, df, cf)
         self.g = (self.M @ x0).reshape(-1)
         const = np.zeros(self.N * (self.nu_c + self.nx_c))
@@ -91,8 +88,8 @@ class RHC_controller():
 
 class ReLUQP_controller(RHC_controller):
 
-    def __init__(self, x0, A, B, Q, R, Pf, N, Ex, dx, cx, Eu, du, cu, Ef, df, cf):
-        super().__init__(x0, A, B, Q, R, Pf, N, Ex, dx, cx, Eu, du, cu, Ef, df, cf)
+    def __init__(self, x0, A, B, K, Q, R, Pf, N, Ex, dx, cx, Eu, du, cu, Ef, df, cf):
+        super().__init__(x0, A, B, K, Q, R, Pf, N, Ex, dx, cx, Eu, du, cu, Ef, df, cf)
         self.solver = ReLU_QP()
         self.solver.setup(self.H, self.g, self.E, self.l, self.upp, precision=torch.float32)
 
@@ -106,14 +103,14 @@ class ReLUQP_controller(RHC_controller):
             self.l = self.c - const
         self.solver.update(g=self.g, l=self.l, u=self.upp)
         result = self.solver.solve()
-        print(f"ReLUQP solver iterations: {result.info.iter}")
+        #print(f"ReLUQP solver iterations: {result.info.iter}")
         self.solve_time += result.info.solve_time
         return result.x[:self.nu].cpu().numpy()
 
 
 class OSQP_controller(RHC_controller):
-    def __init__(self, x0, A, B, Q, R, Pf, N, Ex, dx, cx, Eu, du, cu, Ef, df, cf):
-        super().__init__(x0, A, B, Q, R, Pf, N, Ex, dx, cx, Eu, du, cu, Ef, df, cf)
+    def __init__(self, x0, A, B, K, Q, R, Pf, N, Ex, dx, cx, Eu, du, cu, Ef, df, cf):
+        super().__init__(x0, A, B, K, Q, R, Pf, N, Ex, dx, cx, Eu, du, cu, Ef, df, cf)
         self.solver = osqp.OSQP()
         self.solver.setup(P=sparse.csc_matrix(self.H), q=self.g, A=sparse.csc_matrix(self.E), l=self.l, u=self.upp, eps_abs=1e-3, eps_rel=0, verbose=False)
 
@@ -127,16 +124,16 @@ class OSQP_controller(RHC_controller):
             self.l = self.c - const
         self.solver.update(q=self.g, l=self.l, u=self.upp)
         result = self.solver.solve()
-        print(f"OSQP solver iterations: {result.info.iter}")
+        #print(f"OSQP solver iterations: {result.info.iter}")
         self.solve_time += result.info.solve_time
         return result.x[:self.nu]
 
 
-class PySolver_controller(RHC_controller):
-    def __init__(self, x0, A, B, Q, R, Pf, N, Ex, dx, cx, Eu, du, cu, Ef, df, cf):
-        super().__init__(x0, A, B, Q, R, Pf, N, Ex, dx, cx, Eu, du, cu, Ef, df, cf)
+class CppSolver_controller(RHC_controller):
+    def __init__(self, x0, A, B, K, Q, R, Pf, N, Ex, dx, cx, Eu, du, cu, Ef, df, cf):
+        super().__init__(x0, A, B, K, Q, R, Pf, N, Ex, dx, cx, Eu, du, cu, Ef, df, cf)
         T, eigs, M, M_inv = qp_initialization(self.H, self.E, self.l, self.upp)
-        self.solver = PySolver(0.1, self.H.shape[0], self.E.shape[0], self.H, self.E, T, M, M_inv, self.g, self.l, self.upp, eigs)
+        self.solver = CppSolver(0.1, self.H.shape[0], self.E.shape[0], self.H, self.E, T, M, M_inv, self.g, self.l, self.upp, eigs)
         self.solver.setup()
 
     def solve(self, x0=None):
@@ -153,7 +150,7 @@ class PySolver_controller(RHC_controller):
             self.solver.update(g=self.g, l=self.l, u=self.upp, rho=0.1)
         self.solver.solve()
         result = self.solver.get_results()
-        print(f"PySolver solver iterations: {result.iter}")
+        #print(f"PySolver solver iterations: {result.iter}")
         self.solve_time += result.solve_time
         return result.x_sol[:self.nu]
 

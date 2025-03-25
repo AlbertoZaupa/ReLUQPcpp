@@ -72,7 +72,10 @@ Solver::Solver(float rho_, int nx, int nc, float* H_,
     matmul(handle, TtAtMA, TtAtM, qp_data.A);
 }
 
-void Solver::setup() {
+void Solver::setup(float abs_tol_, int max_iter_, int check_interval_) {
+    abs_tol = abs_tol_;
+    max_iter_ = max_iter;
+    check_interval = check_interval_;
     compute_matrices();
 }
 
@@ -265,18 +268,18 @@ void Solver::solve() {
     iter = 0;
     int i;
     float rho_new = rho;
-    for (i = 0; i < 4000; i++) {
+    for (i = 0; i < max_iter; i++) {
         // state = Project( W*state + b )
         forward_pass();
 
         // If the residuals will be checked on the next iteration, copy the current
         // value of z into z_prev
-        if ((i + 1) % 25 == 0) {
+        if ((i + 1) % check_interval == 0) {
             get_z(z_prev);
         }
 
         // Check residuals and update rho
-        if (i > 0 && i % 25 == 0) {
+        if (i > 0 && i % check_interval == 0) {
             ADMM_data data = compute_rho_residuals(rho_new);
             rho_new = data.rho;
 
@@ -300,7 +303,7 @@ void Solver::solve() {
 bool Solver::check_termination(float primal_res, float dual_res) {
     int nc = qp_data.nc;
     int nx = qp_data.nx;
-    return primal_res < 1e-3 * std::sqrt(nc) && dual_res < 1e-3 * std::sqrt(nx);
+    return primal_res < abs_tol * std::sqrt(nc) && dual_res < abs_tol * std::sqrt(nx);
 }
 
 ADMM_data Solver::compute_rho_residuals(float rho_) {

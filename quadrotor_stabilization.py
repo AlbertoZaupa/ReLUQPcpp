@@ -1,9 +1,16 @@
 import RHC_controllers
 import numpy as np
 import scipy
-    
+import argparse
+
 
 if __name__ == '__main__':
+    parser = argparse.ArgumentParser(description="Run controller with a solver flag.")
+    parser.add_argument("--solver", type=str, required=True, help="Solver flag value (string).")
+    args = parser.parse_args()
+    SOLVER_FLAG = args.solver  # Use the passed argument
+    assert SOLVER_FLAG in ["reluqp", "osqp", "cppsolver"]
+
     g = 9.81
     m = 1.5
     Jx = Jy = 0.03
@@ -11,7 +18,7 @@ if __name__ == '__main__':
     l = 0.225
     c = 0.035
     dt = 0.01
-    N = 20
+    N = 50
 
     A_ = np.array([[0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], 
                   [0, 0, 0, 0, 0, 0, g, 0, 0, 0, 0, 0],
@@ -45,7 +52,7 @@ if __name__ == '__main__':
     A = np.eye(12) + dt * A_
     B = dt * B_
 
-    Q = np.diag(np.array([1, 0, 1, 0, 1, 0, 1, 0.05, 1, 0.05, 1, 0.05]))
+    Q = np.diag(np.array([1, 0, 1, 0, 1, 0, 1, 0.01, 1, 0.01, 1, 0.01]))
     R = np.eye(4)
     Pf = Q
     Ex = np.eye(12)
@@ -55,67 +62,35 @@ if __name__ == '__main__':
     df = dx
     cf = cx
     Eu = np.eye(4)
-    du = np.array([4, 4, 4, 4])
-    cu = np.array([0, 0, 0, 0])
-
-    M = 20
+    du = np.ones(4) * (4 - g*m/4)
+    cu = np.ones(4) * (-g*m/4)
+    M = 50
     
     P = scipy.linalg.solve_discrete_are(A, B, Q, R)
     K = np.linalg.inv(R + B.T @ P @ B) @ (B.T @ P @ A)
 
     # π / 6 tilt along all axes
     x0 = np.array([0, 0, 0, 0, 0, 0, np.pi/6, 0, np.pi/6, 0, np.pi/6, 0])
-    reluqp_controller = RHC_controllers.ReLUQP_controller(x0, A, B, Q, R, Pf, N, Ex,
+    controller_class = None
+    if SOLVER_FLAG == "reluqp":
+        controller_class = RHC_controllers.ReLUQP_controller
+    elif SOLVER_FLAG == "osqp":
+        controller_class = RHC_controllers.OSQP_controller
+    elif SOLVER_FLAG == "cppsolver":
+        controller_class = RHC_controllers.CppSolver_controller
+    
+    solve_times = []
+    for _ in range(1):
+        x_t = x0.copy()
+        controller = controller_class(x0, A, B, K, Q, R, Pf, N, Ex,
                                                       dx, cx, Eu, du, cu, Ef, df, cf)
-    # ReLUQP simulation
-    for t in range(M):
-        if t == 0:
-            u_t = reluqp_controller.solve()
-        else:
-            u_t = reluqp_controller.solve(x0)
-        x0 = A @ x0 + B @ (-K @ x0 + u_t)
-    print(f"ReLUQP total solve time: {reluqp_controller.solve_time}")
+        for t in range(M):
+            if t == 0:
+                u_t = controller.solve()
+            else:
+                u_t = controller.solve(x_t)
+            x_t = A @ x_t + B @ (-K @ x_t + u_t)
 
-    x0 = np.array([0, 0, 0, 0, 0, 0, np.pi/6, 0, np.pi/6, 0, np.pi/6, 0])
-    osqp_controller = RHC_controllers.OSQP_controller(x0, A, B, Q, R, Pf, N, Ex,
-                                                      dx, cx, Eu, du, cu, Ef, df, cf)
-    # OSQP simulation
-    for t in range(M):
-        if t == 0:
-            u_t = osqp_controller.solve()
-        else:
-            u_t = osqp_controller.solve(x0)
-        x0 = A @ x0 + B @ (-K @ x0 + u_t)
-    print(f"OSQP total solve time: {osqp_controller.solve_time}")
-
-    x0 = np.array([0, 0, 0, 0, 0, 0, np.pi/6, 0, np.pi/6, 0, np.pi/6, 0])
-    pysolver_controller = RHC_controllers.PySolver_controller(x0, A, B, Q, R, Pf, N, Ex,
-                                                      dx, cx, Eu, du, cu, Ef, df, cf)
-    # PySolver simulation
-    for t in range(M):
-        if t == 0:
-            u_t = pysolver_controller.solve()
-        else:
-            u_t = pysolver_controller.solve(x0)
-        x0 = A @ x0 + B @ (-K @ x0 + u_t)
-    print(f"PySolver total solve time: {pysolver_controller.solve_time}")
-
-
-    # fig, ax = plt.subplots()
-    # ax.plot(x[:, 0], x[:, 1], marker='o', markersize=3, linestyle='-', color='blue')
-    # ax.set_xlabel(r"$x_1\left(t\right)$")
-    # ax.set_ylabel(r"$x_2\left(t\right)$")
-    # ax.set_title('State trajectory')
-    # ax.grid(True)
-    # ax.axis('equal')  # Ensure the scale is equal on both axes
-    # plt.tight_layout()
-    # plt.savefig(f"results/double_integrator_benchmark/state_trajectory.png")
-
-    # fig, ax = plt.subplots()
-    # ax.plot(range(M),u, marker='o', markersize=3, linestyle='-', color='blue')
-    # ax.set_xlabel(r"$t$")
-    # ax.set_ylabel(r"$u\left(t\right)$")
-    # ax.set_title('Input signal')
-    # ax.grid(True)
-    # plt.tight_layout()
-    # plt.savefig(f"results/double_integrator_benchmark/control_signal.png")
+        solve_times.append(controller.solve_time)
+    
+    print(f"{SOLVER_FLAG} mean solve time: {np.mean(solve_times)}")

@@ -3,8 +3,6 @@ import torch
 import numpy as np
 # from utils import *
 import timeit
-import time
-from scipy.linalg import eigh
 
 class QP(object):
     def __init__(self, H: torch.tensor or np.ndarray, 
@@ -33,14 +31,12 @@ class QP(object):
 
         self.nx = H.shape[0] # number of decision variables
         self.nc = A.shape[0] # number of constraints
-
     
 class Settings(object):
     def __init__(self, verbose=False,
                         warm_starting=True,
                         scaling=False, #todo: implement scaling
                         rho=0.1,
-                        alpha=1,
                         rho_min=1e-6,
                         rho_max=1e6,
                         sigma=1e-6,
@@ -58,7 +54,6 @@ class Settings(object):
         self.warm_starting = warm_starting
         self.scaling = scaling
         self.rho = rho
-        self.alpha = alpha
         self.rho_min = rho_min
         self.rho_max = rho_max
         self.sigma = sigma
@@ -72,7 +67,6 @@ class Settings(object):
         self.device = device
         self.precision = precision
 
-
 class Info(object):
     def __init__(self, iter=None, 
                         status=None, 
@@ -80,7 +74,6 @@ class Info(object):
                         pri_res=None,
                         dua_res=None,
                         setup_time=0,
-                        warm_start_time=0,
                         solve_time=0,
                         update_time=0,
                         run_time=0,
@@ -94,7 +87,6 @@ class Info(object):
         self.setup_time = setup_time
         self.solve_time = solve_time
         self.update_time = update_time
-        self.warm_start_time = warm_start_time
         self.run_time = run_time
         self.rho_estimate = rho_estimate
 
@@ -153,15 +145,10 @@ class ReLU_Layer(torch.nn.Module):
         # Calculate kkt_rhs_invs
         kkt_rhs_invs = []
         for rho_scalar in self.rhos:
-            rho = rho_scalar * torch.ones(nc).to(device=stng.device, dtype=stng.precision)
+            rho = rho_scalar * torch.ones(nc, device=stng.device, dtype=stng.precision).to(g)
             rho[(u - l) <= stng.eq_tol] = rho_scalar * 1e3
-            rho = torch.diag(rho)
-            kkt_rhs_invs.append(torch.inverse(H + sigma * torch.eye(nx).to(device=stng.device, dtype=stng.precision) + A.T @ (rho @ A)))
-
-        # Skeleton of the rho matrix
-        m = torch.ones(nc)
-        m[(u - l) <= stng.eq_tol] = 1e3
-        self.M = torch.diag(m).to(device=stng.device, dtype=stng.precision)
+            rho = torch.diag(rho).to(device=stng.device, dtype=stng.precision)
+            kkt_rhs_invs.append(torch.inverse(H + sigma * torch.eye(nx).to(g) + A.T @ (rho @ A)).to(device=stng.device, dtype=stng.precision))
 
         W_ks = {}
         B_ks = {}
@@ -181,7 +168,7 @@ class ReLU_Layer(torch.nn.Module):
                 torch.cat([ A @ K @ (sigma * Ix - A.T @ (rho @ A)) + A,   2 * A @ K @ A.T @ rho - Ic,  -A @ K @ A.T + rho_inv], dim=1),
                 torch.cat([ rho @ A,                                      -rho,                         Ic], dim=1)
             ], dim=0).contiguous()
-            B_ks[rho_ind] = torch.cat([-K, -A @ K, torch.zeros(nc, nx).to(device=stng.device, dtype=stng.precision)], dim=0).contiguous()
+            B_ks[rho_ind] = torch.cat([-K, -A @ K, torch.zeros(nc, nx).to(g)], dim=0).contiguous()
             b_ks[rho_ind] = (B_ks[rho_ind] @ g).contiguous()
         return W_ks, B_ks, b_ks
 
@@ -191,8 +178,8 @@ class ReLU_Layer(torch.nn.Module):
     
     @torch.jit.script
     def jit_forward(input, W, b, l, u, idx1: int, idx2: int):
-        input = W @ input + b #torch.matmul(W, input, out=input)
-        #input.add_(b)
+        torch.matmul(W, input, out=input)
+        input.add_(b)
         input[idx1:idx2].clamp_(l, u)
         return input
     
@@ -204,13 +191,8 @@ class ReLU_QP(object):
         self.info = Info()
         self.results = Results(info=self.info)
 
-        # Use CUDA events only if CUDA is available.
-        if torch.cuda.is_available():
-            self.start = torch.cuda.Event(enable_timing=True)
-            self.end = torch.cuda.Event(enable_timing=True)
-        else:
-            self.start = None
-            self.end = None
+        self.start = torch.cuda.Event(enable_timing=True)
+        self.end = torch.cuda.Event(enable_timing=True)
 
     def setup(self, H, g, A, l, u, 
                         verbose=False,
@@ -219,7 +201,7 @@ class ReLU_QP(object):
                         rho=0.1,
                         rho_min=1e-6,
                         rho_max=1e6,
-                        sigma=0,
+                        sigma=1e-6,
                         adaptive_rho=True,
                         adaptive_rho_interval=1,
                         adaptive_rho_tolerance=5,
@@ -236,11 +218,7 @@ class ReLU_QP(object):
 
         solver settings can be specified as additional keyword arguments
         """
-        # Begin timing
-        if device.type == "cuda":
-            self.start.record()
-        else:
-            t0 = time.perf_counter()
+        self.start.record()
 
         self.settings = Settings(verbose=verbose,
                                     warm_starting=warm_starting,
@@ -257,8 +235,11 @@ class ReLU_QP(object):
                                     check_interval=check_interval,
                                     device=device,
                                     precision=precision)
-        
+
         self.QP = QP(H, g, A, l, u, device=device, precision=precision)
+        self.QP.M = torch.ones(A.shape[0], device=device, dtype=precision)
+        self.QP.M[(self.QP.u - self.QP.l) <= 1e-6] = 1e3
+        self.QP.M = torch.diag(self.QP.M).to(device=device, dtype=precision).contiguous()
 
         self.layers = ReLU_Layer(QP=self.QP, settings=self.settings)
         
@@ -268,25 +249,17 @@ class ReLU_QP(object):
         self.output = torch.cat([self.x, self.z, self.lam]).to(device=self.settings.device, dtype=self.settings.precision).contiguous()
 
         self.rho_ind = np.argmin(np.abs(self.layers.rhos.cpu().detach().numpy() - self.settings.rho))
-        # End timing
-        if device.type == "cuda":
-            self.end.record()
-            torch.cuda.synchronize()
-            self.results.info.setup_time = self.start.elapsed_time(self.end) / 1000.0
-        else:
-            t1 = time.perf_counter()
-            self.results.info.setup_time = t1 - t0
+
+        self.end.record()
+        torch.cuda.synchronize()
+        self.results.info.setup_time = self.start.elapsed_time(self.end)/1000.0
 
     def update(self, g=None, l=None, u=None,
                Hx=None, Ax=None):
         """
         Update ReLU-QP problem arguments
         """
-        if self.settings.device.type == "cuda":
-            self.start.record()
-        else:
-            t0 = time.perf_counter()
-
+        self.start.record()
         # todo update vectors
         if g is not None:
             self.QP.g = torch.from_numpy(g).to(device=self.settings.device, dtype=self.settings.precision).contiguous()
@@ -300,14 +273,10 @@ class ReLU_QP(object):
 
         # assert that matrices cannot be changed for now
         assert Hx is None and Ax is None, "updating Hx and Ax is not supported yet"
-
-        if self.settings.device.type == "cuda":
-            self.end.record()
-            torch.cuda.synchronize()
-            self.results.info.update_time = self.start.elapsed_time(self.end) / 1000.0
-        else:
-            t1 = time.perf_counter()
-            self.results.info.update_time = t1 - t0
+        
+        self.end.record()
+        torch.cuda.synchronize()
+        self.results.info.update_time = self.start.elapsed_time(self.end)/1000.0
 
         return None
     
@@ -331,26 +300,23 @@ class ReLU_QP(object):
         """
         Solve QP Problem
         """
-        if self.settings.device.type == "cuda":
-            self.start.record()
-        else:
-            t0 = time.perf_counter()
+        self.start.record()
 
         stng = self.settings
         nx, nc = self.QP.nx, self.QP.nc
 
+        # rho = torch.tensor(self.layers.rhos[self.rho_ind]).to(self.settings.device).to(self.settings.precision).contiguous()
         rho = self.layers.rhos[self.rho_ind]
         z_prev = None
-        for k in range(stng.max_iter):
+        # gpu_soln = torch.cat([self.x, self.z, self.lam]).to(self.settings.device).to(self.settings.precision).contiguous()
+        for k in range(1, stng.max_iter + 1):
             self.output = self.layers(self.output, self.rho_ind)
-            self.x, self.z, self.lam = self.output[:nx], self.output[nx:nx+nc], self.output[nx+nc:nx+2*nc]
-            
+            # self.x, self.z, self.lam = gpu_soln[:nx], gpu_soln[nx:nx+nc], gpu_soln[nx+nc:nx+2*nc]
             # rho update
-            if k > 0 and k % stng.check_interval == 0 and stng.adaptive_rho:
+            if k % stng.check_interval == 0 and stng.adaptive_rho:
                 self.x, self.z, self.lam = self.output[:nx], self.output[nx:nx+nc], self.output[nx+nc:nx+2*nc]
-                
-                primal_res, dual_res, rho = self.compute_residuals_OSQP(self.QP.H, 
-                    self.QP.A, self.layers.M, self.QP.g, self.x, self.z, z_prev, self.lam, rho, stng.rho_min, stng.rho_max)
+                primal_res, dual_res, rho = self.compute_residuals(self.QP.H, 
+                        self.QP.A, self.QP.M, self.QP.g, self.x, self.z, z_prev, self.lam, rho, stng.rho_min, stng.rho_max)
 
                 if rho > self.layers.rhos[self.rho_ind] * stng.adaptive_rho_tolerance and self.rho_ind < len(self.layers.rhos) - 1:
                     self.rho_ind += 1
@@ -363,19 +329,17 @@ class ReLU_QP(object):
 
                 # check convergence
                 if primal_res < stng.eps_abs * np.sqrt(nc) and dual_res < stng.eps_abs * np.sqrt(nx):
-                    self.update_results(iter=k+1,
+
+                    self.update_results(iter=k,
                                         status="solved",
                                         pri_res=primal_res,
                                         dua_res=dual_res,
-                                        rho_estimate=rho,
-                                        hessian_inverse_error=0,)
+                                        rho_estimate=rho)
                     
                     return self.results
-            z_prev = self.output[nx:nx+nc].clone()
+            z_prev = self.output[nx: nx+nc].clone()
 
-        primal_res, dual_res, rho = self.compute_residuals_OSQP(self.QP.H, 
-            self.QP.A, self.layers.M, self.QP.g, self.x, self.z, z_prev, self.lam, rho, stng.rho_min, stng.rho_max)
-
+        primal_res, dual_res, rho = self.compute_residuals(self.QP.H, self.QP.A, self.QP.M, self.QP.g, self.x, self.z, z_prev, self.lam, rho, stng.rho_min, stng.rho_max)
         self.update_results(iter=stng.max_iter, 
                             status="max_iters_reached", 
                             pri_res=primal_res, 
@@ -414,17 +378,10 @@ class ReLU_QP(object):
                        status=None, 
                        pri_res=None, 
                        dua_res=None, 
-                       rho_estimate=None,
-                       hessian_inverse_error=None,
-                       rho_list=None,
-                       lagrangian_grads=None,
-                       primal_update_lagrangian_grads=None,
-                       dual_residuals=None):
+                       rho_estimate=None):
         """
         Update results and info
         """
-        if self.settings.device.type != "cuda":
-            t0 = time.perf_counter()
 
         self.results.x = self.x
         self.results.z = self.z
@@ -437,14 +394,9 @@ class ReLU_QP(object):
         self.results.info.dua_res = dua_res
         self.results.info.rho_estimate = rho_estimate
         # self.info.update_time = update_time #todo: implement in update method
-
-        if self.settings.device.type == "cuda":
-            self.end.record()
-            torch.cuda.synchronize()
-            run_time = self.start.elapsed_time(self.end) / 1000.0
-        else:
-            t1 = time.perf_counter()
-            run_time = t1 - t0
+        self.end.record()
+        torch.cuda.synchronize()
+        run_time = self.start.elapsed_time(self.end)/1000.0
         
         self.results.info.run_time = run_time
         self.results.info.solve_time = self.results.info.update_time + run_time
@@ -453,7 +405,7 @@ class ReLU_QP(object):
             self.clear_primal_dual()
     
     @torch.jit.script
-    def compute_residuals_OSQP(H, A, M, g, x, z, z_prev, lam, rho, rho_min: float, rho_max: float):
+    def compute_residuals(H, A, M, g, x, z, z_prev, lam, rho, rho_min: float, rho_max: float):
         t1 = torch.matmul(A, x)
         t2 = torch.matmul(H, x)
         t3 = torch.matmul(A.T, lam)
@@ -467,8 +419,6 @@ class ReLU_QP(object):
             torch.max(torch.linalg.vector_norm(t2, ord=torch.inf), torch.linalg.vector_norm(t3, ord=torch.inf)),
             torch.linalg.vector_norm(g, ord=torch.inf)))
         rho_new = torch.clamp(rho * torch.sqrt(numerator / denom), rho_min, rho_max)
-        if torch.isnan(rho_new):
-            rho_new = rho
         return primal_res, dual_res, rho_new
     
     @torch.jit.script
@@ -502,7 +452,7 @@ if __name__ == "__main__":
 
     for i in range(10):
         qp = ReLU_QP()
-        qp.setup(H=H, g=g, A=A, l=l, u=u, precision=torch.float32)
+        qp.setup(H=H, g=g, A=A, l=l, u=u)
         results = qp.solve()
         print("setup time: ", results.info.setup_time)
         print("solve time: ", results.info.solve_time)
@@ -522,5 +472,4 @@ if __name__ == "__main__":
 
     print(timeit.timeit(lambda: qp.solve(), number = 1000, globals=globals())/1000)
     pass
-
 

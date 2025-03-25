@@ -18,7 +18,7 @@ cdef extern from "solver.hpp" namespace "":
         # Destructor
         # (Cython will call delete when we wrap it)
         void solve()
-        void setup()
+        void setup(float abs_tol, int max_iter, int check_interval)
         void update(const float* g, const float* l, const float* u, float rho_)
         vector[float] get_results()
         float solve_time
@@ -31,7 +31,7 @@ class SolverResults:
         self.solve_time = solve_time
         self.iter = iter
 
-cdef class PySolver:
+cdef class CppSolver:
     cdef Solver* solver_ptr
 
     def __cinit__(self, float rho, int nx, int nc,
@@ -93,8 +93,8 @@ cdef class PySolver:
     def solve(self):
         self.solver_ptr.solve()
 
-    def setup(self):
-        self.solver_ptr.setup()
+    def setup(self, abs_tol=1e-3, max_iter=4000, check_interval=25):
+        self.solver_ptr.setup(abs_tol, max_iter, check_interval)
 
     def update(self, np.ndarray g, np.ndarray l, np.ndarray u, float rho):
         """
