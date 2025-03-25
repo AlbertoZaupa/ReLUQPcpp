@@ -47,15 +47,14 @@ ADMM_data::ADMM_data(float primal_res_, float dual_res_, float rho_) : primal_re
 Solver::Solver(float rho_, int nx, int nc, float* H_,
             float* A_, float* T_, float* M_, 
             float* M_inv_, float* g_, float* l_,
-            float* u_, float* eigs_) : W(nx + 2*nc, nx + 2*nc), B(nx + nc, nx),
+            float* u_, float* eigs_) :
+            qp_data(nx, nc, H_, A_, T_, M_, M_inv_, g_, l_, u_, eigs_),
+            W(nx + 2*nc, nx + 2*nc), B(nx + nc, nx),
             b(nx + 2*nc), x(nx), z(nc), lambda(nc), z_prev(nc), 
             state(nx + 2*nc), rho(rho_), MA(nc, nx),
             AtM(nx, nc), Tt(nx, nx), At(nx, nc), AT(nc, nx), 
             TtAt(nx, nc), TtAtM(nx, nc), TtAtMA(nx, nx)
 {
-    rho = rho_;
-    qp_data = QP_data(nx, nc, H_, A_, T_, M_, M_inv_, g_, l_, u_, eigs_);
-
     // The ADMM state is intialized to zero
     state.scale(0);
     // b is set to zero to avoid having to initialize its last block during ADMM execution
@@ -75,7 +74,6 @@ Solver::Solver(float rho_, int nx, int nc, float* H_,
 
 void Solver::setup() {
     compute_matrices();
-    //display_GPU_matrix(qp_data.g.d_data, qp_data.nx + 2 * qp_data.nc, 1);
 }
 
 Solver::~Solver() {
