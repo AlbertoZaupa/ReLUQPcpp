@@ -5,7 +5,7 @@ import scipy.sparse as sparse
 from reluqp import ReLU_QP
 from solver_wrapper import CppSolver
 import osqp
-from scipy.linalg import eigh
+from utils import qp_initialization
 
 class RHC_controller():
     
@@ -20,6 +20,7 @@ class RHC_controller():
         self.l = self.c - const
 
         self.solve_time = 0
+        self.worst_case_time = 0
 
     def condense(self, A, B, Q, R, Pf, N, Ex, dx, cx, Eu, du, cu, Ef, df, cf):
         # Dimensions
@@ -105,6 +106,8 @@ class ReLUQP_controller(RHC_controller):
         result = self.solver.solve()
         #print(f"ReLUQP solver iterations: {result.info.iter}")
         self.solve_time += result.info.solve_time
+        if result.info.solve_time > self.worst_case_time:
+            self.worst_case_time = result.info.solve_time
         return result.x[:self.nu].cpu().numpy()
 
 
@@ -126,6 +129,8 @@ class OSQP_controller(RHC_controller):
         result = self.solver.solve()
         #print(f"OSQP solver iterations: {result.info.iter}")
         self.solve_time += result.info.solve_time
+        if result.info.solve_time > self.worst_case_time:
+            self.worst_case_time = result.info.solve_time
         return result.x[:self.nu]
 
 
@@ -148,37 +153,9 @@ class CppSolver_controller(RHC_controller):
             self.solver.update(g=self.g, l=self.l, u=self.upp, rho=-1)
         else:
             self.solver.update(g=self.g, l=self.l, u=self.upp, rho=0.1)
-        self.solver.solve()
-        result = self.solver.get_results()
-        #print(f"PySolver solver iterations: {result.iter}")
-        self.solve_time += result.solve_time
-        return result.x_sol[:self.nu]
-
-
-
-
-def qp_initialization(H: np.ndarray, A: np.ndarray, l: np.ndarray, u: np.ndarray):
-    eq_tol = 1e-6
-    nx = H.shape[0]
-    nc = A.shape[0]
-
-    # Decomposition for fast update of ADMM hessian
-    eigs, U = eigh(H, driver="evd")
-    e_inv = 1 / eigs
-    e_sqrt = np.sqrt(e_inv)
-    L_inv = U @ np.diag(e_sqrt) @ U.T
-    H_inv = U @ np.diag(e_inv) @ U.T
-
-    # Scaling matrix enforces higher penalty to equality constraints
-    sqrtm = np.ones(nc)
-    m = np.ones(nc)
-    m_inv  = np.ones(nc)
-    sqrtm[(u - l) <= eq_tol] = np.sqrt(1e3)
-    m[(u - l) <= eq_tol] = 1e3
-    m_inv[(u - l) <= eq_tol] = 1e-3
-    sqrtM = np.diag(sqrtm)
-
-    S = L_inv @ A.T @ sqrtM
-    eigs, U = eigh(S @ S.T, driver="evd")
-    T = L_inv.T @ U
-    return T, eigs, m, m_inv
+        result = self.solver.solve()
+        #print(f"CppSolver iterations: {result.info.iter}")
+        self.solve_time += result.info.solve_time
+        if result.info.solve_time > self.worst_case_time:
+            self.worst_case_time = result.info.solve_time
+        return result.info.x_sol[:self.nu]

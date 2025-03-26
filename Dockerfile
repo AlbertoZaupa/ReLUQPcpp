@@ -26,13 +26,16 @@ RUN ln -sf /usr/bin/python3.10 /usr/bin/python \
 RUN pip install numpy
 RUN pip install cython
 RUN pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu116
-RUN pip install scipy osqp
+RUN pip install scipy osqp cvxpy matplotlib
+RUN pip install tqdm
 
 # Set up work directory
 WORKDIR /workspace
 
 # Copy the C++ source code into the container
 COPY . .
+
+RUN mkdir /shared
 
 # Build the C++ code
 RUN mkdir build && cd build && cmake .. && make

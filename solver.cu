@@ -284,13 +284,18 @@ void Solver::solve() {
             rho_new = data.rho;
 
             if (check_termination(data.primal_res, data.dual_res)) break;
-
-            if (rho_new > 5 * rho) {
-                rho = 5 * rho;
+            if (i / check_interval <= 0) {
+                rho = rho_new;
                 compute_matrices();
-            } else if (rho_new < rho / 5) {
-                rho = rho / 5;
-                compute_matrices();
+            }
+            else {
+                if (rho_new > 5 * rho) {
+                    rho = 5 * rho;
+                    compute_matrices();
+                } else if (rho_new < rho / 5) {
+                    rho = rho / 5;
+                    compute_matrices();
+                }
             }
         }
     }
