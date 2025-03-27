@@ -179,17 +179,16 @@ if __name__ == '__main__':
 
 
     if PLOT_FLAG:
-        plt.style.use("ggplot")
         fig, ax = plt.subplots()
         ax.plot(np.array(range(M)) * dt, theta_x, color="royalblue", linestyle="-", linewidth=2, label=r"$\theta_x(t)$")
         ax.plot(np.array(range(M)) * dt, theta_y, color="tomato", linestyle="--", linewidth=2, label=r"$\theta_y(t)$")
         ax.set_ylabel(r"$\theta(t)$")
         ax.set_xlabel('t')
+        ax.grid(axis='y', linestyle='--', alpha=0.7)
         ax.legend()
         plt.tight_layout()
         plt.savefig(f"/shared/quadrotor_angles.png")
 
-        plt.style.use("ggplot")
         fig, ax = plt.subplots()
         ax.plot(np.array(range(M)) * dt, u[:, 0], color="royalblue", linestyle="-", linewidth=2, label=r"$u_1(t)$")
         ax.plot(np.array(range(M)) * dt, u[:, 1], color="tomato", linestyle="--", linewidth=2, label=r"$u_2(t)$")
@@ -197,6 +196,7 @@ if __name__ == '__main__':
         ax.plot(np.array(range(M)) * dt, u[:, 3], color="purple", linestyle="--", linewidth=2, label=r"$u_4(t)$")
         ax.set_ylabel(r"$u(t)$")
         ax.set_xlabel('t')
+        ax.grid(axis='y', linestyle='--', alpha=0.7)
         ax.legend()
         plt.tight_layout()
         plt.savefig(f"/shared/quadrotor_inputs.png")
