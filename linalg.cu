@@ -428,7 +428,7 @@ void affine_transformation(cublasHandle_t handle, Vector &dst, const Matrix &W, 
                              &beta,
                              dst.d_data, 1));
     // Add bias b: y = y + b
-    int blockSize = 256;
+    int blockSize = 512;
     int gridSize = (y.n_elements + blockSize - 1) / blockSize;
     addKernel<<<gridSize, blockSize>>>(dst.d_data, dst.d_data, b.d_data, dst.n_elements);
     CUDA_CHECK(cudaGetLastError());

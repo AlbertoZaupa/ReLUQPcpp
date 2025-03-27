@@ -44,10 +44,11 @@ QP_data::QP_data(int nx_, int nc_, float* H_, float* A_, float* T_, float* M_,
 ADMM_data::ADMM_data(float primal_res_, float dual_res_, float rho_) : primal_res(primal_res_),
     dual_res(dual_res_), rho(rho_) {}
 
-Solver::Solver(float rho_, int nx, int nc, float* H_,
+Solver::Solver(int reactive_rho_duration_, float rho_, int nx, int nc, float* H_,
             float* A_, float* T_, float* M_, 
             float* M_inv_, float* g_, float* l_,
             float* u_, float* eigs_) :
+            reactive_rho_duration(reactive_rho_duration_),
             qp_data(nx, nc, H_, A_, T_, M_, M_inv_, g_, l_, u_, eigs_),
             W(nx + 2*nc, nx + 2*nc), B(nx + nc, nx),
             b(nx + 2*nc), x(nx), z(nc), lambda(nc), z_prev(nc), 
@@ -284,7 +285,7 @@ void Solver::solve() {
             rho_new = data.rho;
 
             if (check_termination(data.primal_res, data.dual_res)) break;
-            if (i / check_interval <= 0) {
+            if (i / check_interval <= reactive_rho_duration) {
                 rho = rho_new;
                 compute_matrices();
             }
@@ -398,6 +399,9 @@ void Solver::update(const float* g, const float* l, const float* u, float rho_) 
     if (rho_ > 0) {
         rho = rho_;
         compute_matrices();
+    } else {
+        // b update
+        matvecmul(handle, b.d_data, B, qp_data.g);
     }
 
     // Stop timing

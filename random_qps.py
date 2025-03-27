@@ -76,7 +76,7 @@ def solve(solver, nx=10, n_eq=5, n_ineq=5, seed=1, tol=1e-4, check_interval=CHEC
         model.setup(P=sparse.csc_matrix(H), q=g, A=sparse.csc_matrix(A), l=l, u=u, eps_abs=1e-3, eps_rel=0, verbose=False)
     elif solver.solver_type == 'Proposed solver':
         T, eigs, M, M_inv = utils.qp_initialization(H, A, l, u)
-        model = CppSolver(0.1, H.shape[0], A.shape[0], H, A, T, M, M_inv, g, l, u, eigs)
+        model = CppSolver(0.1, H.shape[0], A.shape[0], H, A, T, M, M_inv, g, l, u, eigs, reactive_rho_duration=5)
     
     results = model.solve()
 

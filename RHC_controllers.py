@@ -21,6 +21,7 @@ class RHC_controller():
 
         self.solve_time = 0
         self.worst_case_time = 0
+        self.worst_case_time_iter = 0
 
     def condense(self, A, B, Q, R, Pf, N, Ex, dx, cx, Eu, du, cu, Ef, df, cf):
         # Dimensions
@@ -94,7 +95,7 @@ class ReLUQP_controller(RHC_controller):
         self.solver = ReLU_QP()
         self.solver.setup(self.H, self.g, self.E, self.l, self.upp, precision=torch.float32)
 
-    def solve(self, x0=None):
+    def solve(self, t, x0=None):
         if not x0 is None:
             self.g = (self.M @ x0).reshape(-1)
             const = np.zeros(self.N * (self.nu_c + self.nx_c))
@@ -102,12 +103,13 @@ class ReLUQP_controller(RHC_controller):
             const[self.N * self.nu_c:] = self.F2 @ x0
             self.upp = self.d - const
             self.l = self.c - const
-        self.solver.update(g=self.g, l=self.l, u=self.upp)
+            self.solver.update(g=self.g, l=self.l, u=self.upp)
         result = self.solver.solve()
-        #print(f"ReLUQP solver iterations: {result.info.iter}")
+        #print(f"ReLUQP solver solve time: {result.info.solve_time}")
         self.solve_time += result.info.solve_time
         if result.info.solve_time > self.worst_case_time:
             self.worst_case_time = result.info.solve_time
+            self.worst_case_time_iter = t
         return result.x[:self.nu].cpu().numpy()
 
 
@@ -117,7 +119,7 @@ class OSQP_controller(RHC_controller):
         self.solver = osqp.OSQP()
         self.solver.setup(P=sparse.csc_matrix(self.H), q=self.g, A=sparse.csc_matrix(self.E), l=self.l, u=self.upp, eps_abs=1e-3, eps_rel=0, verbose=False)
 
-    def solve(self, x0=None):
+    def solve(self, t, x0=None):
         if not x0 is None:
             self.g = (self.M @ x0).reshape(-1)
             const = np.zeros(self.N * (self.nu_c + self.nx_c))
@@ -125,12 +127,13 @@ class OSQP_controller(RHC_controller):
             const[self.N * self.nu_c:] = self.F2 @ x0
             self.upp = self.d - const
             self.l = self.c - const
-        self.solver.update(q=self.g, l=self.l, u=self.upp)
+            self.solver.update(q=self.g, l=self.l, u=self.upp)
         result = self.solver.solve()
         #print(f"OSQP solver iterations: {result.info.iter}")
         self.solve_time += result.info.solve_time
         if result.info.solve_time > self.worst_case_time:
             self.worst_case_time = result.info.solve_time
+            self.worst_case_time_iter = t
         return result.x[:self.nu]
 
 
@@ -141,7 +144,7 @@ class CppSolver_controller(RHC_controller):
         self.solver = CppSolver(0.1, self.H.shape[0], self.E.shape[0], self.H, self.E, T, M, M_inv, self.g, self.l, self.upp, eigs)
         self.solver.setup()
 
-    def solve(self, x0=None):
+    def solve(self, t, x0=None):
         if not x0 is None:
             self.g = (self.M @ x0).reshape(-1)
             const = np.zeros(self.N * (self.nu_c + self.nx_c))
@@ -149,13 +152,10 @@ class CppSolver_controller(RHC_controller):
             const[self.N * self.nu_c:] = self.F2 @ x0
             self.upp = self.d - const
             self.l = self.c - const
-        if x0 is None:
             self.solver.update(g=self.g, l=self.l, u=self.upp, rho=-1)
-        else:
-            self.solver.update(g=self.g, l=self.l, u=self.upp, rho=0.1)
         result = self.solver.solve()
-        #print(f"CppSolver iterations: {result.info.iter}")
         self.solve_time += result.info.solve_time
         if result.info.solve_time > self.worst_case_time:
             self.worst_case_time = result.info.solve_time
+            self.worst_case_time_iter = t
         return result.info.x_sol[:self.nu]

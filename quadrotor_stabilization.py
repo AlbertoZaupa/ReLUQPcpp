@@ -154,22 +154,29 @@ if __name__ == '__main__':
     controller = controller_class(x0, A, B, K, Q, R, Pf, N, Ex,
                                             dx, cx, Eu, du, cu, Ef, df, cf)
     x_t = x0.copy()
+
     for t in range(M):
         # Save states
         theta_x[t] = x_t[6]
         theta_y[t] = x_t[8]
         if t == 0:
-            u_t = controller.solve()
+            u_t = controller.solve(t)
         else:
-            u_t = controller.solve(x_t)
+            u_t = controller.solve(t, x_t)
         u_t += u_const
+        u_t = np.clip(u_t, np.zeros(4), 4 * np.ones(4))
         # save input
         u[t, :] = u_t
         # propagate dynamics
         x_t = rk4(quadrotor_dynamics, x_t, u_t, dt)
     
-    print(f"{SOLVER_FLAG} average solve time: {controller.solve_time / M}\n")
+    if SOLVER_FLAG == "reluqp_warm":
+        print(f"{SOLVER_FLAG} average solve time: {(controller.solve_time - controller.worst_case_time) / (M - 1)}\n")
+    else:
+        print(f"{SOLVER_FLAG} average solve time: {controller.solve_time / M}\n")
     print(f"{SOLVER_FLAG} worst case solve time: {controller.worst_case_time}\n")
+    #print(f"{SOLVER_FLAG} worst case solve time iteration: {controller.worst_case_time_iter}\n")
+
 
     if PLOT_FLAG:
         plt.style.use("ggplot")

@@ -10,7 +10,7 @@ cdef extern from "solver.hpp" namespace "":
     # Forward-declare the Solver class. We only wrap the public members.
     cdef cppclass Solver:
         # Constructor
-        Solver(float rho_, int nx, int nc,
+        Solver(int reactive_rho_duration, float rho_, int nx, int nc,
                float* H_, float* A_, float* T_,
                float* M_, float* M_inv_,
                float* g_, float* l_, float* u_,
@@ -43,7 +43,7 @@ cdef class CppSolver:
     def __cinit__(self, float rho, int nx, int nc,
                   np.ndarray H, np.ndarray A, np.ndarray T,
                   np.ndarray M, np.ndarray M_inv,
-                  np.ndarray g, np.ndarray l, np.ndarray u, np.ndarray eigs):
+                  np.ndarray g, np.ndarray l, np.ndarray u, np.ndarray eigs, int reactive_rho_duration = 0):
         """
         Create a new Solver instance.
         The arrays H, A, g, l, u should be provided as
@@ -81,7 +81,7 @@ cdef class CppSolver:
         H = H.copy(order='F')
 
         # Create the Solver instance.
-        self.solver_ptr = new Solver(rho, nx, nc,
+        self.solver_ptr = new Solver(reactive_rho_duration, rho, nx, nc,
                                      <float*>H.data,
                                      <float*>A.data,
                                      <float*>T.data,

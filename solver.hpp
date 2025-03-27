@@ -24,7 +24,7 @@ public:
 
 class Solver {
 public:
-    Solver(float rho_, int nx, int nc, float* H_,
+    Solver(int reactive_rho_duration, float rho_, int nx, int nc, float* H_,
         float* A_, float* T_, float* M_, 
         float* M_inv_, float* g_, float* l_,
         float* u_, float* eigs_);
@@ -47,6 +47,7 @@ private:
     float abs_tol = 1e-3;
     int max_iter = 4000;
     int check_interval = 25;
+    int reactive_rho_duration = 0;
 
     void compute_matrices();
     void forward_pass();
