@@ -103,7 +103,7 @@ def random_initial_solve(solvers, nx_min=10, nx_max=1000, n_sample=10, n_seeds=5
             solver_data.compute_iterations_statistics()
             solver_data.compute_solve_time_statistics()
 
-    plt.style.use("ggplot")
+    #xplt.style.use("ggplot")
     
     # solve time plots
     fig, ax = plt.subplots()
@@ -112,6 +112,7 @@ def random_initial_solve(solvers, nx_min=10, nx_max=1000, n_sample=10, n_seeds=5
                 linestyle='-', capsize=5, label=f"{solvers[idx].solver_type}")
     ax.set_xlabel('problem size')
     ax.set_ylabel('solve time (s)')
+    ax.grid(axis='y', linestyle='--', alpha=0.7)
     ax.legend()
     plt.tight_layout()
     plt.savefig(f"/shared/solve_time_comparison.png")
@@ -122,6 +123,7 @@ def random_initial_solve(solvers, nx_min=10, nx_max=1000, n_sample=10, n_seeds=5
         ax.errorbar(nx_list, solver_data.avg_iterations, yerr=solver_data.std_iterations, marker='o', linestyle='-', capsize=5, label=f"{solvers[idx].solver_type}")
     ax.set_xlabel('problem size')
     ax.set_ylabel('iterations')
+    ax.grid(axis='y', linestyle='--', alpha=0.7)
     ax.legend()
     plt.tight_layout()
     plt.savefig(f"/shared/iterations_comparison.png")
