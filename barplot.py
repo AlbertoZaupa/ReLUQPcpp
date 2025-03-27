@@ -83,7 +83,7 @@ ax.set_ylabel("Average solve time (s)")
 ax.grid(axis='y', linestyle='--', alpha=0.7)
 
 # Show plot
-plt.savefig(f"./results/quadrotor_avg_solve_times.png")
+plt.savefig(f"./results/quadrotor_avg_solve_times.pdf")
 
 
 # AVERAGE SOLVE TIMES, WITH RELUQP WARM STARTED
@@ -115,7 +115,7 @@ ax.set_ylabel("Average solve time (s)")
 ax.grid(axis='y', linestyle='--', alpha=0.7)
 
 # Show plot
-plt.savefig(f"./results/quadrotor_avg_solve_times_reluqp_warm.png")
+plt.savefig(f"./results/quadrotor_avg_solve_times_reluqp_warm.pdf")
 
 
 # WORST CASE SOLVE TIMES
@@ -124,7 +124,7 @@ plt.savefig(f"./results/quadrotor_avg_solve_times_reluqp_warm.png")
 # Compute mean and standard deviation for each algorithm
 means = [np.mean(times) for times in worst_case_time]
 std_devs = [np.std(times, ddof=1) for times in worst_case_time]  # ddof=1 for sample std dev
-
+print(means)
 # Create bar chart with error bars
 fig, ax = plt.subplots()
 ax.bar(algorithms, means, yerr=std_devs, capsize=10, color=['skyblue', 'salmon', 'lightgreen'], edgecolor='black')
@@ -135,7 +135,7 @@ ax.set_ylabel("Worst case solve time (s)")
 ax.grid(axis='y', linestyle='--', alpha=0.7)
 
 # Show plot
-plt.savefig(f"./results/quadrotor_worst_case_times.png")
+plt.savefig(f"./results/quadrotor_worst_case_times.pdf")
 
 
 # WORST CASE SOLVE TIME RELUQP EXCLUDED
@@ -151,4 +151,4 @@ ax.set_ylabel("Worst case solve time (s)")
 ax.grid(axis='y', linestyle='--', alpha=0.7)
 
 # Show plot
-plt.savefig(f"./results/quadrotor_worst_case_times_reluqp_excluded.png")
+plt.savefig(f"./results/quadrotor_worst_case_times_reluqp_excluded.pdf")

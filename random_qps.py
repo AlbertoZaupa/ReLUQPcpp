@@ -85,48 +85,50 @@ def solve(solver, nx=10, n_eq=5, n_ineq=5, seed=1, tol=1e-4, check_interval=CHEC
 
 def random_initial_solve(solvers, nx_min=10, nx_max=1000, n_sample=10, n_seeds=5, tol=1e-4):
     nx_list = np.linspace(nx_min, nx_max, num=n_sample)
-        
+    nx_list = np.hstack((nx_list[:3], nx_list))
+
     solver_data_list = []
     for solver in solvers:
         solver_data_list.append(SolverData())
 
-    for nx in nx_list:
+    for j, nx in enumerate(nx_list):
         print("nx: ", int(nx))
         for seed in tqdm.tqdm(range(n_seeds)):
             for idx, solver in enumerate(solvers):
                 results = solve(solver, nx=int(nx), n_eq=int(nx/4), n_ineq=int(nx/4), seed=seed, tol=tol, check_interval=solver.check_interval)
                 #assert results.info.iter < MAX_ITER, idx
-                solver_data_list[idx].iterations.append(results.info.iter)
-                solver_data_list[idx].solve_time.append(results.info.solve_time)
-
-        for solver_data in solver_data_list:
-            solver_data.compute_iterations_statistics()
-            solver_data.compute_solve_time_statistics()
+                if j >= 3:
+                    solver_data_list[idx].iterations.append(results.info.iter)
+                    solver_data_list[idx].solve_time.append(results.info.solve_time)
+        if j >= 3:
+            for solver_data in solver_data_list:
+                solver_data.compute_iterations_statistics()
+                solver_data.compute_solve_time_statistics()
 
     #xplt.style.use("ggplot")
     
     # solve time plots
     fig, ax = plt.subplots()
     for idx, solver_data in enumerate(solver_data_list):
-        ax.errorbar(nx_list, solver_data.avg_solve_times, yerr=solver_data.std_solve_times, marker='o',
+        ax.errorbar(nx_list[3:], solver_data.avg_solve_times, yerr=solver_data.std_solve_times, marker='o',
                 linestyle='-', capsize=5, label=f"{solvers[idx].solver_type}")
     ax.set_xlabel('problem size')
     ax.set_ylabel('solve time (s)')
     ax.grid(axis='y', linestyle='--', alpha=0.7)
     ax.legend()
     plt.tight_layout()
-    plt.savefig(f"/shared/solve_time_comparison.png")
+    plt.savefig(f"/shared/solve_time_comparison.pdf")
     
     # iterations plots
     fig, ax = plt.subplots()
     for idx, solver_data in enumerate(solver_data_list):
-        ax.errorbar(nx_list, solver_data.avg_iterations, yerr=solver_data.std_iterations, marker='o', linestyle='-', capsize=5, label=f"{solvers[idx].solver_type}")
+        ax.errorbar(nx_list[3:], solver_data.avg_iterations, yerr=solver_data.std_iterations, marker='o', linestyle='-', capsize=5, label=f"{solvers[idx].solver_type}")
     ax.set_xlabel('problem size')
     ax.set_ylabel('iterations')
     ax.grid(axis='y', linestyle='--', alpha=0.7)
     ax.legend()
     plt.tight_layout()
-    plt.savefig(f"/shared/iterations_comparison.png")
+    plt.savefig(f"/shared/iterations_comparison.pdf")
 
 
 if __name__ == "__main__":

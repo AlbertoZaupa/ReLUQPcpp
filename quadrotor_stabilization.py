@@ -187,7 +187,7 @@ if __name__ == '__main__':
         ax.grid(axis='y', linestyle='--', alpha=0.7)
         ax.legend()
         plt.tight_layout()
-        plt.savefig(f"/shared/quadrotor_angles.png")
+        plt.savefig(f"/shared/quadrotor_angles.pdf")
 
         fig, ax = plt.subplots()
         ax.plot(np.array(range(M)) * dt, u[:, 0], color="royalblue", linestyle="-", linewidth=2, label=r"$u_1(t)$")
@@ -199,5 +199,5 @@ if __name__ == '__main__':
         ax.grid(axis='y', linestyle='--', alpha=0.7)
         ax.legend()
         plt.tight_layout()
-        plt.savefig(f"/shared/quadrotor_inputs.png")
+        plt.savefig(f"/shared/quadrotor_inputs.pdf")
 
