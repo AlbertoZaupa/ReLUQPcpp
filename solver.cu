@@ -52,12 +52,14 @@ Solver::Solver(int reactive_rho_duration_, float rho_, int nx, int nc, float* H_
             qp_data(nx, nc, H_, A_, T_, M_, M_inv_, g_, l_, u_, eigs_),
             W(nx + 2*nc, nx + 2*nc), B(nx + nc, nx),
             b(nx + 2*nc), x(nx), z(nc), lambda(nc), z_prev(nc), 
-            state(nx + 2*nc), rho(rho_), MA(nc, nx),
+            state1(nx + 2*nc), state2(nx + 2*nc), rho(rho_), MA(nc, nx),
             AtM(nx, nc), Tt(nx, nx), At(nx, nc), AT(nc, nx), 
             TtAt(nx, nc), TtAtM(nx, nc), TtAtMA(nx, nx)
 {
     // The ADMM state is intialized to zero
-    state.scale(0);
+    state1.scale(0);
+    state = &state1;
+    next_state = &state2;
     // b is set to zero to avoid having to initialize its last block during ADMM execution
     b.scale(0);
 
@@ -71,6 +73,23 @@ Solver::Solver(int reactive_rho_duration_, float rho_, int nx, int nc, float* H_
     matmul(handle, TtAt, Tt, At);
     right_diag_matmul(TtAtM, TtAt, qp_data.M);
     matmul(handle, TtAtMA, TtAtM, qp_data.A);
+
+    float bytes = 0;
+    bytes += qp_data.M.n_elements * sizeof(float);
+    bytes += qp_data.M_inv.n_elements * sizeof(float);
+    bytes += qp_data.eigs.n_elements * sizeof(float);
+    bytes += W.rows * W.cols * sizeof(float);
+    bytes += B.rows * B.cols * sizeof(float);
+    bytes += b.n_elements * sizeof(float);
+    bytes += MA.rows * MA.cols * sizeof(float);
+    bytes += AtM.rows * AtM.cols * sizeof(float);
+    bytes += Tt.rows * Tt.cols * sizeof(float);
+    bytes += At.rows * At.cols * sizeof(float);
+    bytes += AT.rows * AT.cols * sizeof(float);
+    bytes += TtAt.rows * TtAt.cols * sizeof(float);
+    bytes += TtAtM.rows * TtAtM.cols * sizeof(float);
+    bytes += TtAtMA.rows * TtAtMA.cols * sizeof(float);
+    std::cout << "CppSolver memory usage: " << bytes / 1e6 << " Mbs\n";
 }
 
 void Solver::setup(float abs_tol_, int max_iter_, int check_interval_) {
@@ -88,8 +107,8 @@ void Solver::compute_matrices() {
     // Computation of S = (I + rho * EIG) ^ {-1}
     Vector S = Vector(qp_data.nx);
     int blockSize = 256;
-    int gridSize = (state.n_elements + blockSize - 1) / blockSize;
-    computeSKernel<<<gridSize, blockSize>>>(qp_data.eigs.d_data, rho, S.d_data, state.n_elements);
+    int gridSize = (state1.n_elements + blockSize - 1) / blockSize;
+    computeSKernel<<<gridSize, blockSize>>>(qp_data.eigs.d_data, rho, S.d_data, state1.n_elements);
     CUDA_CHECK(cudaGetLastError());
 
     // Computation of auxiliary matrices
@@ -259,8 +278,11 @@ void Solver::compute_matrices() {
 
 void Solver::forward_pass() {
     // state = W*state + b
-    affine_transformation(handle, state, W, state, b);
-    clip(state.d_data + qp_data.nx, qp_data.l, qp_data.u);
+    affine_transformation(handle, *next_state, W, *state, b);
+    Vector *tmp = state;
+    state = next_state;
+    next_state = tmp;
+    clip((*state).d_data + qp_data.nx, qp_data.l, qp_data.u);
 }
 
 void Solver::solve() {
@@ -325,12 +347,9 @@ ADMM_data Solver::compute_rho_residuals(float rho_) {
     Vector primal_res_vec(qp_data.nc);
     vecdiff(primal_res_vec, t1, z);
     Vector dual_res_vec(qp_data.nx);
-    // !!!! DANGEROUS CODE
-    dual_res_vec.n_elements = qp_data.nc;
-    vecdiff(dual_res_vec, z_prev, z);
-    matvecmul(handle, dual_res_vec.d_data, AtM, dual_res_vec);
-    dual_res_vec.n_elements = qp_data.nx;
-    // END OF DANGEROUS CODE
+    Vector tmp(qp_data.nc);
+    vecdiff(tmp, z_prev, z);
+    matvecmul(handle, dual_res_vec, AtM, tmp);
     Vector lagrangian_grad(qp_data.nx);
     vecsum(lagrangian_grad, t2, qp_data.g);
     vecsum(lagrangian_grad, t3, lagrangian_grad);
@@ -360,7 +379,7 @@ void Solver::get_x(Vector &dst) {
         std::cerr << "Function get_x. Vectors dimensions mismatch." << std::endl;
         exit(EXIT_FAILURE);
     }
-    CUDA_CHECK(cudaMemcpy(dst.d_data, state.d_data, qp_data.nx * sizeof(float), cudaMemcpyDeviceToDevice));
+    CUDA_CHECK(cudaMemcpy(dst.d_data, (*state).d_data, qp_data.nx * sizeof(float), cudaMemcpyDeviceToDevice));
 }
 
 void Solver::get_z(Vector &dst) {
@@ -368,7 +387,7 @@ void Solver::get_z(Vector &dst) {
         std::cerr << "Function get_z. Vectors dimensions mismatch." << std::endl;
         exit(EXIT_FAILURE);
     }
-    CUDA_CHECK(cudaMemcpy(dst.d_data, state.d_data + qp_data.nx, qp_data.nc * sizeof(float), cudaMemcpyDeviceToDevice));
+    CUDA_CHECK(cudaMemcpy(dst.d_data, (*state).d_data + qp_data.nx, qp_data.nc * sizeof(float), cudaMemcpyDeviceToDevice));
 }
 
 void Solver::get_lambda(Vector &dst) {
@@ -376,7 +395,7 @@ void Solver::get_lambda(Vector &dst) {
         std::cerr << "Function get_lambda. Vectors dimensions mismatch." << std::endl;
         exit(EXIT_FAILURE);
     }
-    CUDA_CHECK(cudaMemcpy(dst.d_data, state.d_data + qp_data.nx + qp_data.nc, qp_data.nc * sizeof(float), cudaMemcpyDeviceToDevice));
+    CUDA_CHECK(cudaMemcpy(dst.d_data, (*state).d_data + qp_data.nx + qp_data.nc, qp_data.nc * sizeof(float), cudaMemcpyDeviceToDevice));
 }
 
 std::vector<float> Solver::get_results() {

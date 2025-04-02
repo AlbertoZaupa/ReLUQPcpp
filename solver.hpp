@@ -38,7 +38,9 @@ public:
     int iter = 0;
 private:
     QP_data qp_data;
-    Vector state, x, z, lambda, z_prev;
+    Vector state1, state2, x, z, lambda, z_prev;
+    Vector* state;
+    Vector* next_state;
     Matrix W, B;
     Vector b;
     Matrix TtAtMA, TtAtM, TtAt, Tt, At, AT, MA, AtM;
