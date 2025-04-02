@@ -186,6 +186,7 @@ class ReLU_Layer(torch.nn.Module):
     @torch.jit.script
     def jit_forward(input, W, b, l, u, idx1: int, idx2: int):
         torch.matmul(W, input, out=input)
+        #input = W @ input
         input.add_(b)
         input[idx1:idx2].clamp_(l, u)
         return input
