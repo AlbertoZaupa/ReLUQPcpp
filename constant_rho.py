@@ -154,7 +154,7 @@ if __name__ == '__main__':
     M = 200
     K = np.zeros((B.shape[1], B.shape[0]))
     x0 = np.array([0, 0, 0, 0, 0, 0, np.pi/6, 0, -np.pi/6, 0, 0, 0])
-    rho_values = np.logspace(np.log10(0.01), np.log10(10000), num=1000)
+    rho_values = np.logspace(np.log10(0.001), np.log10(1000), num=10000)
 
     iters = []
     for rho in rho_values:

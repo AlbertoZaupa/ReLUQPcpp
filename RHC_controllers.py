@@ -105,7 +105,7 @@ class ReLUQP_controller(RHC_controller):
             self.l = self.c - const
             self.solver.update(g=self.g, l=self.l, u=self.upp)
         result = self.solver.solve()
-        #print(f"ReLUQP solver solve time: {result.info.solve_time}")
+        print(f"ReLUQP solver iterations: {result.info.iter}")
         self.solve_time += result.info.solve_time
         if result.info.solve_time > self.worst_case_time:
             self.worst_case_time = result.info.solve_time
@@ -155,6 +155,8 @@ class CppSolver_controller(RHC_controller):
             self.solver.update(g=self.g, l=self.l, u=self.upp, rho=-1)
         result = self.solver.solve()
         self.solve_time += result.info.solve_time
+        print(f"CppSolver iterations: {result.info.iter}")
+        print(f"CppSolver solve time: {result.info.solve_time}")
         if result.info.solve_time > self.worst_case_time:
             self.worst_case_time = result.info.solve_time
             self.worst_case_time_iter = t

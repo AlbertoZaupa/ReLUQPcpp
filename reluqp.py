@@ -112,6 +112,13 @@ class ReLU_Layer(torch.nn.Module):
         self.W_ks, self.B_ks, self.b_ks = self.setup_matrices()
         self.clamp_inds = (self.QP.nx, self.QP.nx + self.QP.nc)
 
+        bytes_ = 0
+        for i in range(len(self.rhos)):
+            bytes_ += self.W_ks[i].element_size() * self.W_ks[i].numel()
+            bytes_ += self.B_ks[i].element_size() * self.B_ks[i].numel()
+            bytes_ += self.b_ks[i].element_size() * self.b_ks[i].numel()
+        print(f"ReLU-QP memory usage: {bytes_ / 1e6} Mbs")
+
     def setup_rhos(self):
         """
         Setup rho values for ADMM
