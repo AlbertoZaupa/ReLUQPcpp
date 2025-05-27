@@ -1,6 +1,5 @@
 # Use the CUDA base image with Ubuntu
-FROM nvidia/cuda:11.6.1-base-ubuntu20.04
-
+FROM nvidia/cuda:12.4.0-devel-ubuntu22.04
 # Prevent interactive prompts
 ENV DEBIAN_FRONTEND=noninteractive
 
@@ -11,8 +10,7 @@ RUN apt-get update && apt-get install -y \
     git \
     wget \
     python3.10 \
-    python3-pip \
-    cuda-toolkit-11-6  # Install the CUDA toolkit
+    python3-pip 
     
 RUN rm -rf /var/lib/apt/lists/*
 
@@ -25,7 +23,7 @@ RUN ln -sf /usr/bin/python3.10 /usr/bin/python \
 
 RUN pip install numpy
 RUN pip install cython
-RUN pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu116
+RUN pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu124
 RUN pip install scipy osqp cvxpy matplotlib
 RUN pip install tqdm
 

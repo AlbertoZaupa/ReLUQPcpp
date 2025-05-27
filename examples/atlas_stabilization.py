@@ -1,9 +1,9 @@
 import numpy as np
 import argparse
-from solver_wrapper import CppSolver
+from gpusolver import GpuSolver
 from reluqp import ReLU_QP
 from osqp import OSQP
-from utils import qp_initialization
+from examples.utils import qp_initialization
 from scipy import sparse
 import torch
 
@@ -12,11 +12,11 @@ if __name__ == '__main__':
     parser.add_argument("--solver", type=str, required=True, help="Solver flag value (string).")
     args = parser.parse_args()
     SOLVER_FLAG = args.solver  # Use the passed argument
-    assert SOLVER_FLAG in ["reluqp", "osqp", "cppsolver", "reluqp_warm"]
+    assert SOLVER_FLAG in ["reluqp", "reluqp_warm", "osqp", "gpusolver"]
 
     M = 300
     # Loading the data
-    data = np.load('atlas_balancing_output.npz')
+    data = np.load('examples/atlas_balancing_output.npz')
     H = data['H']
     g = data['g']
     A = data['A']
@@ -41,9 +41,9 @@ if __name__ == '__main__':
     if SOLVER_FLAG in ["reluqp", "reluqp_warm"]:
         solver = ReLU_QP()
         solver.setup(H, g, A, l, u, precision=torch.float64)
-    elif SOLVER_FLAG == "cppsolver":
+    elif SOLVER_FLAG == "gpusolver":
         T, eigs, M_, M_inv_ = qp_initialization(H, A, l, u)
-        solver = CppSolver(0.1, H.shape[0], A.shape[0], H, A, T, M_, M_inv_, g, l, u, eigs)
+        solver = GpuSolver(0.1, H.shape[0], A.shape[0], H, A, T, M_, M_inv_, g, l, u, eigs)
         solver.setup()
     elif SOLVER_FLAG == "osqp":
         solver = OSQP()
@@ -55,7 +55,7 @@ if __name__ == '__main__':
         dx_t = dx[:, t]
         if SOLVER_FLAG in ["reluqp", "reluqp_warm"]:
             solver.update(g=g + g_x0 @ dx_t, l=l + lu_x0 @ dx_t, u=u + lu_x0 @ dx_t)
-        elif SOLVER_FLAG == "cppsolver":
+        elif SOLVER_FLAG == "gpusolver":
             solver.update(g=g + g_x0 @ dx_t, l=l + lu_x0 @ dx_t, u=u + lu_x0 @ dx_t, rho=-1)
         elif SOLVER_FLAG == "osqp":
             solver.update(q=g + g_x0 @ dx_t, l=l + lu_x0 @ dx_t, u=u + lu_x0 @ dx_t)
@@ -63,8 +63,8 @@ if __name__ == '__main__':
         solve_time += result.info.solve_time
         if result.info.solve_time > worst_case_time:
             worst_case_time = result.info.solve_time
-        #print(f"Solve time: {result.info.solve_time}")
-        #print(f"Iterations: {result.info.iter}")
+        print(f"Solve time: {result.info.solve_time}")
+        print(f"Iterations: {result.info.iter}")
 
     if SOLVER_FLAG == "reluqp_warm":
         print(f"{SOLVER_FLAG} average solve time: {(solve_time - worst_case_time) / (M - 1)}")

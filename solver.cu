@@ -4,11 +4,11 @@
 #include <cmath>
 #include <chrono>
 
-void display_matrix(float* d_M, int rows, int cols);
-void display_GPU_matrix(float* d_M, int rows, int cols);
+void display_matrix(real* d_M, int rows, int cols);
+void display_GPU_matrix(real* d_M, int rows, int cols);
 
 // Custom kernel for computing matrix S in Solver::compute_matrices
-__global__ void computeSKernel(const float* eigs, float rho, float* out, int n) {
+__global__ void computeSKernel(const real* eigs, real rho, real* out, int n) {
     int i = blockIdx.x * blockDim.x + threadIdx.x;
     if (i < n) {
         out[i] = 1 / (1 + rho * eigs[i]);
@@ -16,7 +16,7 @@ __global__ void computeSKernel(const float* eigs, float rho, float* out, int n) 
 }
 
 // Custom kernel to perform efficiently A = A + D * s, where D is diagonal
-__global__ void addScaledDiagMatrixKernel(float* A, const float* d, float s, int n) {
+__global__ void addScaledDiagMatrixKernel(real* A, const real* d, real s, int n) {
     int i = blockIdx.x * blockDim.x + threadIdx.x;
     if (i < n) {
         A[n * i + i] += d[i] * s;
@@ -26,8 +26,8 @@ __global__ void addScaledDiagMatrixKernel(float* A, const float* d, float s, int
 QP_data::QP_data() : nx(0), nc(0), H(), A(), T(),
     M(), M_inv(), g(), l(), u(), eigs() {}
 
-QP_data::QP_data(int nx_, int nc_, float* H_, float* A_, float* T_, float* M_, 
-        float* M_inv_, float* g_, float* l_, float* u_, float* eigs_) : 
+QP_data::QP_data(int nx_, int nc_, real* H_, real* A_, real* T_, real* M_, 
+        real* M_inv_, real* g_, real* l_, real* u_, real* eigs_) : 
         nx(nx_), nc(nc_), H(nx_, nx_), A(nc_, nx_), T(nx_, nx_), M(nc_), 
         M_inv(nc_), g(nx_), l(nc_), u(nc_), eigs(nx_) {
     H.copyFromHost(H_);
@@ -41,20 +41,24 @@ QP_data::QP_data(int nx_, int nc_, float* H_, float* A_, float* T_, float* M_,
     eigs.copyFromHost(eigs_);
 }
 
-ADMM_data::ADMM_data(float primal_res_, float dual_res_, float rho_) : primal_res(primal_res_),
+ADMM_data::ADMM_data(real primal_res_, real dual_res_, real rho_) : primal_res(primal_res_),
     dual_res(dual_res_), rho(rho_) {}
 
-Solver::Solver(int reactive_rho_duration_, float rho_, int nx, int nc, float* H_,
-            float* A_, float* T_, float* M_, 
-            float* M_inv_, float* g_, float* l_,
-            float* u_, float* eigs_) :
+Solver::Solver(bool verbose, int reactive_rho_duration_, real rho_, int nx, int nc, real* H_,
+            real* A_, real* T_, real* M_, 
+            real* M_inv_, real* g_, real* l_,
+            real* u_, real* eigs_) :
             reactive_rho_duration(reactive_rho_duration_),
             qp_data(nx, nc, H_, A_, T_, M_, M_inv_, g_, l_, u_, eigs_),
             W(nx + 2*nc, nx + 2*nc), B(nx + nc, nx),
             b(nx + 2*nc), x(nx), z(nc), lambda(nc), z_prev(nc), 
             state1(nx + 2*nc), state2(nx + 2*nc), rho(rho_), MA(nc, nx),
             AtM(nx, nc), Tt(nx, nx), At(nx, nc), AT(nc, nx), 
-            TtAt(nx, nc), TtAtM(nx, nc), TtAtMA(nx, nx)
+            TtAt(nx, nc), TtAtM(nx, nc), TtAtMA(nx, nx),
+            S(nx), rhoSTtAtMA(nx, nx), rhoSTtAtM(nx, nc), STtAt(nx, nc),
+            STt(qp_data.nx, qp_data.nx), A__(nx, nx), B_(nx, nc), C_(nx, nc),
+            D_(nc, nx), E_(nc, nc), F_(nc, nc), G_(nc, nx), H__(nc, nc),
+            I_(nc, nc), B1_(nx, nx), B2_(nc, nx)
 {
     // The ADMM state is intialized to zero
     state1.scale(0);
@@ -73,26 +77,45 @@ Solver::Solver(int reactive_rho_duration_, float rho_, int nx, int nc, float* H_
     matmul(handle, TtAt, Tt, At);
     right_diag_matmul(TtAtM, TtAt, qp_data.M);
     matmul(handle, TtAtMA, TtAtM, qp_data.A);
+    eye(I_);
 
-    float bytes = 0;
-    bytes += qp_data.M.n_elements * sizeof(float);
-    bytes += qp_data.M_inv.n_elements * sizeof(float);
-    bytes += qp_data.eigs.n_elements * sizeof(float);
-    bytes += W.rows * W.cols * sizeof(float);
-    bytes += B.rows * B.cols * sizeof(float);
-    bytes += b.n_elements * sizeof(float);
-    bytes += MA.rows * MA.cols * sizeof(float);
-    bytes += AtM.rows * AtM.cols * sizeof(float);
-    bytes += Tt.rows * Tt.cols * sizeof(float);
-    bytes += At.rows * At.cols * sizeof(float);
-    bytes += AT.rows * AT.cols * sizeof(float);
-    bytes += TtAt.rows * TtAt.cols * sizeof(float);
-    bytes += TtAtM.rows * TtAtM.cols * sizeof(float);
-    bytes += TtAtMA.rows * TtAtMA.cols * sizeof(float);
-    std::cout << "CppSolver memory usage: " << bytes / 1e6 << " Mbs\n";
+    // Display the total amount of memory allocated
+    if (verbose) {
+        real bytes = 0;
+        bytes += B2_.rows * B2_.cols * sizeof(real);
+        bytes += B1_.rows * B1_.cols * sizeof(real);
+        bytes += I_.rows * I_.cols * sizeof(real);
+        bytes += H__.rows * H__.cols * sizeof(real);
+        bytes += F_.rows * F_.cols * sizeof(real);
+        bytes += E_.rows * E_.cols * sizeof(real);
+        bytes += D_.rows * D_.cols * sizeof(real);
+        bytes += C_.rows * C_.cols * sizeof(real);
+        bytes += B_.rows * B_.cols * sizeof(real);
+        bytes += A__.rows * A__.cols * sizeof(real);
+        bytes += STt.rows * STt.cols * sizeof(real);
+        bytes += STtAt.rows * STtAt.cols * sizeof(real);
+        bytes += rhoSTtAtM.rows * rhoSTtAtM.cols * sizeof(real);
+        bytes += rhoSTtAtMA.rows * rhoSTtAtMA.cols * sizeof(real);
+        bytes += S.n_elements * sizeof(real);
+        bytes += qp_data.M.n_elements * sizeof(real);
+        bytes += qp_data.M_inv.n_elements * sizeof(real);
+        bytes += qp_data.eigs.n_elements * sizeof(real);
+        bytes += W.rows * W.cols * sizeof(real);
+        bytes += B.rows * B.cols * sizeof(real);
+        bytes += b.n_elements * sizeof(real);
+        bytes += MA.rows * MA.cols * sizeof(real);
+        bytes += AtM.rows * AtM.cols * sizeof(real);
+        bytes += Tt.rows * Tt.cols * sizeof(real);
+        bytes += At.rows * At.cols * sizeof(real);
+        bytes += AT.rows * AT.cols * sizeof(real);
+        bytes += TtAt.rows * TtAt.cols * sizeof(real);
+        bytes += TtAtM.rows * TtAtM.cols * sizeof(real);
+        bytes += TtAtMA.rows * TtAtMA.cols * sizeof(real);
+        std::cout << "CppSolver memory usage: " << bytes / 1e6 << " Mbs\n";
+    }
 }
 
-void Solver::setup(float abs_tol_, int max_iter_, int check_interval_) {
+void Solver::setup(real abs_tol_, int max_iter_, int check_interval_) {
     abs_tol = abs_tol_;
     max_iter_ = max_iter;
     check_interval = check_interval_;
@@ -105,55 +128,35 @@ Solver::~Solver() {
 
 void Solver::compute_matrices() {
     // Computation of S = (I + rho * EIG) ^ {-1}
-    Vector S = Vector(qp_data.nx);
     int blockSize = 256;
     int gridSize = (state1.n_elements + blockSize - 1) / blockSize;
     computeSKernel<<<gridSize, blockSize>>>(qp_data.eigs.d_data, rho, S.d_data, state1.n_elements);
     CUDA_CHECK(cudaGetLastError());
 
     // Computation of auxiliary matrices
-    Matrix rhoSTtAtMA(qp_data.nx, qp_data.nx);
     left_diag_matmul(rhoSTtAtMA, S, TtAtMA);
     rhoSTtAtMA.scale(rho);
-    Matrix rhoSTtAtM(qp_data.nx, qp_data.nc);
     left_diag_matmul(rhoSTtAtM, S, TtAtM);
     rhoSTtAtM.scale(rho);
-    Matrix STtAt(qp_data.nx, qp_data.nc);
     left_diag_matmul(STtAt, S, TtAt);
-    Matrix STt(qp_data.nx, qp_data.nx);
     left_diag_matmul(STt, S, Tt);
 
     // Computation of matrices A_, B_, C_, D_, E_, F_, G_, H_, I_
     // which constitute W as W = [[A_ B_ C_]; [D_ E_ F_]; [G_ H_ I_]]
-
-    Matrix A_(qp_data.nx, qp_data.nx);
-    matmul_scale(handle, A_, qp_data.T, rhoSTtAtMA, -1);
-    Matrix B_(qp_data.nx, qp_data.nc);
+    matmul_scale(handle, A__, qp_data.T, rhoSTtAtMA, -1);
     matmul_scale(handle, B_, qp_data.T, rhoSTtAtM, 2);
-    Matrix C_(qp_data.nx, qp_data.nc);
     matmul_scale(handle, C_, qp_data.T, STtAt, -1);
-    Matrix D_(qp_data.nc, qp_data.nx);
     matmul_scale_add(handle, D_, AT, rhoSTtAtMA, -1, qp_data.A);
-    Matrix E_(qp_data.nc, qp_data.nc);
     matmul_scale(handle, E_, AT, rhoSTtAtM, 2);
     E_.addScalarMatrix(-1);
-        
-    // Custom Kernel to perform F_ = F_ + D * s efficiently
-    Matrix F_(qp_data.nc, qp_data.nc);
     matmul_scale(handle, F_, AT, STtAt, -1);
     blockSize = 256,
     gridSize = (qp_data.nc + blockSize - 1) / blockSize;
     addScaledDiagMatrixKernel<<<gridSize, blockSize>>>(F_.d_data, qp_data.M_inv.d_data, 1 / rho, qp_data.nc);
     CUDA_CHECK(cudaGetLastError());
-
-
-    Matrix G_(qp_data.nc, qp_data.nx);
     G_.copyFromDevice(MA.d_data);
     G_.scale(rho);
-    Matrix H_(qp_data.nc, qp_data.nc);
-    diag(H_, qp_data.M, -rho);
-    Matrix I_(qp_data.nc, qp_data.nc);
-    eye(I_);
+    diag(H__, qp_data.M, -rho);
 
     // COMPUTATION OF W
     // Offsets in memory (column-major order)
@@ -169,105 +172,103 @@ void Solver::compute_matrices() {
     int ldA = qp_data.nx;
     // Copy A_ to W(0,0)
     CUDA_CHECK(cudaMemcpy2D(W.d_data + row_offset_1 + col_offset_1 * ldW,
-                   ldW * sizeof(float),
-                   A_.d_data,
-                   ldA * sizeof(float),
-                   ldA * sizeof(float),  // Width = num_rows in bytes
+                   ldW * sizeof(real),
+                   A__.d_data,
+                   ldA * sizeof(real),
+                   ldA * sizeof(real),  // Width = num_rows in bytes
                     qp_data.nx, // Height = num_cols
                    cudaMemcpyDeviceToDevice));
     // Copy B_ to W(0, 1)
     int ldB = qp_data.nx;
     CUDA_CHECK(cudaMemcpy2D(W.d_data + row_offset_1 + col_offset_2 * ldW,
-        ldW * sizeof(float),
+        ldW * sizeof(real),
         B_.d_data,
-        ldB * sizeof(float),
-        ldB * sizeof(float),  // Width = num_rows in bytes
+        ldB * sizeof(real),
+        ldB * sizeof(real),  // Width = num_rows in bytes
         qp_data.nc, // Height = num_cols
         cudaMemcpyDeviceToDevice));
     // Copy C_ to W(0, 2)
     int ldC = qp_data.nx;
     CUDA_CHECK(cudaMemcpy2D(W.d_data + row_offset_1 + col_offset_3 * ldW,
-        ldW * sizeof(float),
+        ldW * sizeof(real),
         C_.d_data,
-        ldC * sizeof(float),
-        ldC * sizeof(float),  // Width = num_rows in bytes
+        ldC * sizeof(real),
+        ldC * sizeof(real),  // Width = num_rows in bytes
         qp_data.nc, // Height = num_cols
         cudaMemcpyDeviceToDevice));
     // Copy D_ to W(1, 0)
     int ldD = qp_data.nc;
     CUDA_CHECK(cudaMemcpy2D(W.d_data + row_offset_2 + col_offset_1 * ldW,
-        ldW * sizeof(float),
+        ldW * sizeof(real),
         D_.d_data,
-        ldD * sizeof(float),
-        ldD * sizeof(float),  // Width = num_rows in bytes
+        ldD * sizeof(real),
+        ldD * sizeof(real),  // Width = num_rows in bytes
         qp_data.nx, // Height = num_cols
         cudaMemcpyDeviceToDevice));
     // Copy E_ to W(1, 1)
     int ldE = qp_data.nc;
     CUDA_CHECK(cudaMemcpy2D(W.d_data + row_offset_2 + col_offset_2 * ldW,
-        ldW * sizeof(float),
+        ldW * sizeof(real),
         E_.d_data,
-        ldE * sizeof(float),
-        ldE * sizeof(float),  // Width = num_rows in bytes
+        ldE * sizeof(real),
+        ldE * sizeof(real),  // Width = num_rows in bytes
         qp_data.nc, // Height = num_cols
         cudaMemcpyDeviceToDevice));
     // Copy F_ to W(1, 2)
     int ldF = qp_data.nc;
     CUDA_CHECK(cudaMemcpy2D(W.d_data + row_offset_2 + col_offset_3 * ldW,
-        ldW * sizeof(float),
+        ldW * sizeof(real),
         F_.d_data,
-        ldF * sizeof(float),
-        ldF * sizeof(float),  // Width = num_rows in bytes
+        ldF * sizeof(real),
+        ldF * sizeof(real),  // Width = num_rows in bytes
         qp_data.nc, // Height = num_cols
         cudaMemcpyDeviceToDevice));
     // Copy D_ to W(2, 0)
     int ldG = qp_data.nc;
     CUDA_CHECK(cudaMemcpy2D(W.d_data + row_offset_3 + col_offset_1 * ldW,
-        ldW * sizeof(float),
+        ldW * sizeof(real),
         G_.d_data,
-        ldG * sizeof(float),
-        ldG * sizeof(float),  // Width = num_rows in bytes
+        ldG * sizeof(real),
+        ldG * sizeof(real),  // Width = num_rows in bytes
         qp_data.nx, // Height = num_cols
         cudaMemcpyDeviceToDevice));
     // Copy H_ to W(2, 1)
     int ldH = qp_data.nc;
     CUDA_CHECK(cudaMemcpy2D(W.d_data + row_offset_3 + col_offset_2 * ldW,
-        ldW * sizeof(float),
-        H_.d_data,
-        ldH * sizeof(float),
-        ldH * sizeof(float),  // Width = num_rows in bytes
+        ldW * sizeof(real),
+        H__.d_data,
+        ldH * sizeof(real),
+        ldH * sizeof(real),  // Width = num_rows in bytes
         qp_data.nc, // Height = num_cols
         cudaMemcpyDeviceToDevice));
     // Copy I_ to W(2, 2)
     int ldI = qp_data.nc;
     CUDA_CHECK(cudaMemcpy2D(W.d_data + row_offset_3 + col_offset_3 * ldW,
-        ldW * sizeof(float),
+        ldW * sizeof(real),
         I_.d_data,
-        ldI * sizeof(float),
-        ldI * sizeof(float),  // Width = num_rows in bytes
+        ldI * sizeof(real),
+        ldI * sizeof(real),  // Width = num_rows in bytes
         qp_data.nc, // Height = num_cols
         cudaMemcpyDeviceToDevice));
         
     // COMPUTATION OF B
-    Matrix B1_(qp_data.nx, qp_data.nx);
     matmul_scale(handle, B1_, qp_data.T, STt, -1);
-    Matrix B2_(qp_data.nc, qp_data.nx);
     matmul_scale(handle, B2_, AT, STt, -1);
     int ldB1 = qp_data.nx;
     int ldB2 = qp_data.nc;
     ldB = qp_data.nx + qp_data.nc;
     CUDA_CHECK(cudaMemcpy2D(B.d_data,
-        ldB * sizeof(float),
+        ldB * sizeof(real),
         B1_.d_data,
-        ldB1 * sizeof(float),
-        ldB1 * sizeof(float),  // Width = num_rows in bytes
+        ldB1 * sizeof(real),
+        ldB1 * sizeof(real),  // Width = num_rows in bytes
         qp_data.nx, // Height = num_cols
         cudaMemcpyDeviceToDevice));
     CUDA_CHECK(cudaMemcpy2D(B.d_data + qp_data.nx,
-        ldB * sizeof(float),
+        ldB * sizeof(real),
         B2_.d_data,
-        ldB2 * sizeof(float),
-        ldB2 * sizeof(float),  // Width = num_rows in bytes
+        ldB2 * sizeof(real),
+        ldB2 * sizeof(real),  // Width = num_rows in bytes
         qp_data.nx, // Height = num_cols
         cudaMemcpyDeviceToDevice));
         
@@ -290,7 +291,7 @@ void Solver::solve() {
     auto start = std::chrono::high_resolution_clock::now();
     iter = 0;
     int i;
-    float rho_new = rho;
+    real rho_new = rho;
     for (i = 0; i < max_iter; i++) {
         // state = Project( W*state + b )
         forward_pass();
@@ -328,13 +329,13 @@ void Solver::solve() {
     solve_time = std::chrono::duration<double, std::milli>(end - start).count() / 1000; // solve time in seconds
 }
 
-bool Solver::check_termination(float primal_res, float dual_res) {
+bool Solver::check_termination(real primal_res, real dual_res) {
     int nc = qp_data.nc;
     int nx = qp_data.nx;
     return primal_res < abs_tol * std::sqrt(nc) && dual_res < abs_tol * std::sqrt(nx);
 }
 
-ADMM_data Solver::compute_rho_residuals(float rho_) {
+ADMM_data Solver::compute_rho_residuals(real rho_) {
     get_x(x);
     get_z(z);
     get_lambda(lambda);
@@ -365,7 +366,7 @@ ADMM_data Solver::compute_rho_residuals(float rho_) {
 
     double num = primal_res / std::max(t1_norm, z_norm);
     double den = lagrangian_grad_norm / std::max(std::max(t2_norm, t3_norm), g_norm);
-    float rho_new = rho_ * std::sqrt(num / den);
+    real rho_new = rho_ * std::sqrt(num / den);
     if (rho_new < 1e-6) rho_new = 1e-6;
     if (rho_new > 1e6) rho_new = 1e6;
 
@@ -379,7 +380,7 @@ void Solver::get_x(Vector &dst) {
         std::cerr << "Function get_x. Vectors dimensions mismatch." << std::endl;
         exit(EXIT_FAILURE);
     }
-    CUDA_CHECK(cudaMemcpy(dst.d_data, (*state).d_data, qp_data.nx * sizeof(float), cudaMemcpyDeviceToDevice));
+    CUDA_CHECK(cudaMemcpy(dst.d_data, (*state).d_data, qp_data.nx * sizeof(real), cudaMemcpyDeviceToDevice));
 }
 
 void Solver::get_z(Vector &dst) {
@@ -387,7 +388,7 @@ void Solver::get_z(Vector &dst) {
         std::cerr << "Function get_z. Vectors dimensions mismatch." << std::endl;
         exit(EXIT_FAILURE);
     }
-    CUDA_CHECK(cudaMemcpy(dst.d_data, (*state).d_data + qp_data.nx, qp_data.nc * sizeof(float), cudaMemcpyDeviceToDevice));
+    CUDA_CHECK(cudaMemcpy(dst.d_data, (*state).d_data + qp_data.nx, qp_data.nc * sizeof(real), cudaMemcpyDeviceToDevice));
 }
 
 void Solver::get_lambda(Vector &dst) {
@@ -395,18 +396,18 @@ void Solver::get_lambda(Vector &dst) {
         std::cerr << "Function get_lambda. Vectors dimensions mismatch." << std::endl;
         exit(EXIT_FAILURE);
     }
-    CUDA_CHECK(cudaMemcpy(dst.d_data, (*state).d_data + qp_data.nx + qp_data.nc, qp_data.nc * sizeof(float), cudaMemcpyDeviceToDevice));
+    CUDA_CHECK(cudaMemcpy(dst.d_data, (*state).d_data + qp_data.nx + qp_data.nc, qp_data.nc * sizeof(real), cudaMemcpyDeviceToDevice));
 }
 
-std::vector<float> Solver::get_results() {
+std::vector<real> Solver::get_results() {
     get_x(x);
-    std::vector<float> result(qp_data.nx);
-    float* result_data = result.data();
-    CUDA_CHECK(cudaMemcpy(result_data, x.d_data, qp_data.nx * sizeof(float), cudaMemcpyDeviceToHost));
+    std::vector<real> result(qp_data.nx);
+    real* result_data = result.data();
+    CUDA_CHECK(cudaMemcpy(result_data, x.d_data, qp_data.nx * sizeof(real), cudaMemcpyDeviceToHost));
     return result;
 }
 
-void Solver::update(const float* g, const float* l, const float* u, float rho_) {
+void Solver::update(const real* g, const real* l, const real* u, real rho_) {
     // Start timing
     auto start = std::chrono::high_resolution_clock::now();
     
@@ -428,13 +429,13 @@ void Solver::update(const float* g, const float* l, const float* u, float rho_) 
     update_time = std::chrono::duration<double, std::milli>(end - start).count() / 1000; // solve time in seconds
 }
 
-void display_GPU_matrix(float* d_M, int rows, int cols) {
-    float M[rows * cols];
-    CUDA_CHECK(cudaMemcpy(M, d_M, rows * cols * sizeof(float), cudaMemcpyDeviceToHost));
+void display_GPU_matrix(real* d_M, int rows, int cols) {
+    real M[rows * cols];
+    CUDA_CHECK(cudaMemcpy(M, d_M, rows * cols * sizeof(real), cudaMemcpyDeviceToHost));
     display_matrix(M, rows, cols);
 }
 
-void display_matrix(float* M, int rows, int cols) {
+void display_matrix(real* M, int rows, int cols) {
     for (int i=0; i<rows; i++) {
         for (int j=0; j<cols; j++) {
             std::cout << M[j * rows + i] << " ";
@@ -444,24 +445,24 @@ void display_matrix(float* M, int rows, int cols) {
 } 
 
 /*int main() {
-    float H[9] = {6, 2, 1, 2, 5, 2, 1, 2, 4};
-    float g[3] = {-8, -3, -3};
-    float A[15] = {1, 0, 1, 0, 0, 0, 1, 0, 1, 0, 1, 1, 0, 0, 1};
-    float l[5] = {3, 0, -10, -10, -10};
-    float u[5] = {3, 0, INFINITY, INFINITY, INFINITY};
-    float T[9] = {0.27741242, 0.27728448, -0.27724179, -0.30141514, 0.42981273, 0.03884762, 0.15799476, -0.12442978, 0.48464509};
-    float eigs[3] = {2.30738285e-01, 2.88861322e+02, 5.43016374e+02};
-    float M[5] = {1e3, 1e3, 1, 1, 1};
-    float M_inv[5] = {1e-3, 1e-3, 1, 1, 1};
+    real H[9] = {6, 2, 1, 2, 5, 2, 1, 2, 4};
+    real g[3] = {-8, -3, -3};
+    real A[15] = {1, 0, 1, 0, 0, 0, 1, 0, 1, 0, 1, 1, 0, 0, 1};
+    real l[5] = {3, 0, -10, -10, -10};
+    real u[5] = {3, 0, INFINITY, INFINITY, INFINITY};
+    real T[9] = {0.27741242, 0.27728448, -0.27724179, -0.30141514, 0.42981273, 0.03884762, 0.15799476, -0.12442978, 0.48464509};
+    real eigs[3] = {2.30738285e-01, 2.88861322e+02, 5.43016374e+02};
+    real M[5] = {1e3, 1e3, 1, 1, 1};
+    real M_inv[5] = {1e-3, 1e-3, 1, 1, 1};
     int nx = 3;
     int nc = 5;
-    float rho = 0.1;
+    real rho = 0.1;
 
     Solver solver(rho, nx, nc, H, A, T, M, M_inv, g, l, u, eigs);
     solver.setup();
     solver.solve();
     std::cout << "Solver execution time: " << solver.solve_time << " s" << std::endl;
-    std::vector<float> result = solver.get_results();
+    std::vector<real> result = solver.get_results();
     display_matrix(result.data(), nx, 1);
 
     return 0;

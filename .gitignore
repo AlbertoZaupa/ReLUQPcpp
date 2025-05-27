@@ -1,6 +1,5 @@
 .vscode
 __pycache__
-maros_meszaros.py
+cpusolver
 random_qps
-results/**
-!results/.gitkeep
+examples/results

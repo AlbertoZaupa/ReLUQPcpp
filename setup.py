@@ -12,8 +12,8 @@ if not os.path.exists(solver_so_path):
 
 ext_modules = [
     Extension(
-        "solver_wrapper",
-        sources=["solver_wrapper.pyx"],  # Only compile the Cython wrapper
+        "gpusolver",
+        sources=["gpusolver.pyx"],  # Only compile the Cython wrapper
         include_dirs=[np.get_include(), "/usr/local/cuda/include"],  # Include NumPy headers
         library_dirs=["/workspace/build/lib", "/usr/local/cuda/lib64"],  # Path to solver.so
         libraries=["solver"],  # Link against solver.so
@@ -25,7 +25,7 @@ ext_modules = [
 ]
 
 setup(
-    name="solver_wrapper",
+    name="gpusolver",
     ext_modules=cythonize(ext_modules),
     zip_safe=False,
 )

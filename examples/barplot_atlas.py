@@ -3,6 +3,7 @@ import matplotlib.pyplot as plt
 import subprocess
 import re
 
+
 def run_solver(solver, runs=10, extra_args=None):
     """
     Runs the solver command repeatedly, parses output, and returns lists of average and worst-case times.
@@ -13,7 +14,7 @@ def run_solver(solver, runs=10, extra_args=None):
     """
     avg_times = []
     worst_times = []
-    base_command = ['python3', 'atlas_stabilization.py', '--solver', solver]
+    base_command = ['python3', 'examples/atlas_stabilization.py', '--solver', solver]
     if extra_args:
         base_command.extend(extra_args)
     for _ in range(runs):
@@ -54,10 +55,16 @@ std_devs = [np.std(times, ddof=1) for times in avg_solve_time]
 
 # Create bar chart with error bars for average solve times
 fig, ax = plt.subplots()
-ax.bar([s[0] for s in solvers], means, yerr=std_devs, capsize=10,
+ax.bar([s[0] for s in solvers], means, capsize=10,
        color=['blue', 'lightgreen', 'orange'], edgecolor='black')
 ax.set_xlabel("Solvers")
 ax.set_ylabel("Average solve time (s)")
 ax.grid(axis='y', linestyle='--', alpha=0.7)
-plt.savefig("./results/atlas_avg_solve_times.pdf")
+plt.savefig("/shared/atlas_avg_solve_times.pdf", format="pdf", bbox_inches="tight")
 plt.close()
+
+f = open("/shared/atlas_stabilization.txt", "w")
+f.write(f"cppsolver average solve time: {means[0]} +- {std_devs[0]}\n")
+f.write(f"osqp average solve time: {means[1]} +- {std_devs[1]}\n")
+f.write(f"reluqp average solve time: {means[2]} +- {std_devs[2]}\n")
+

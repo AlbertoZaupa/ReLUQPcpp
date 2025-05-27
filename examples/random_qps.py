@@ -6,7 +6,7 @@ import tqdm
 import torch
 import osqp
 from scipy import sparse
-import utils as utils
+import examples.utils as utils
 
 
 DEVICE = torch.device("cuda")
@@ -124,14 +124,15 @@ def random_initial_solve(solvers, nx_min=10, nx_max=1000, n_sample=10, n_seeds=5
         lower_error = avg - np.array(solver_data.min_solve_times)
         upper_error = np.array(solver_data.max_solve_times) - avg
         asymmetric_error = np.vstack((lower_error, upper_error))
-        ax.errorbar(nx_list[3:], avg, yerr=asymmetric_error, marker='o',
+        color = 'blue' if solvers[idx].solver_type == 'Proposed solver' else 'orange'
+        ax.errorbar(nx_list[3:], avg, yerr=asymmetric_error, marker='o', color=color,
                     linestyle='-', capsize=5, label=f"{solvers[idx].solver_type}")
     ax.set_xlabel('problem size')
     ax.set_ylabel('solve time (s)')
     ax.grid(axis='y', linestyle='--', alpha=0.7)
     ax.legend()
     plt.tight_layout()
-    plt.savefig(f"/shared/solve_time_comparison.pdf")
+    plt.savefig(f"/shared/random_qps_solve_time_comparison_f32.pdf", format="pdf", bbox_inches="tight")
     
     # Plotting iterations using error bars from min and max
     fig, ax = plt.subplots()
@@ -140,14 +141,15 @@ def random_initial_solve(solvers, nx_min=10, nx_max=1000, n_sample=10, n_seeds=5
         lower_error = avg - np.array(solver_data.min_iterations)
         upper_error = np.array(solver_data.max_iterations) - avg
         asymmetric_error = np.vstack((lower_error, upper_error))
-        ax.errorbar(nx_list[3:], avg, yerr=asymmetric_error, marker='o',
+        color = 'blue' if solvers[idx].solver_type == 'Proposed solver' else 'orange'
+        ax.errorbar(nx_list[3:], avg, yerr=asymmetric_error, marker='o', color=color,
                     linestyle='-', capsize=5, label=f"{solvers[idx].solver_type}")
     ax.set_xlabel('problem size')
     ax.set_ylabel('iterations')
     ax.grid(axis='y', linestyle='--', alpha=0.7)
     ax.legend()
     plt.tight_layout()
-    plt.savefig(f"/shared/iterations_comparison.pdf")
+    plt.savefig(f"/shared/random_qps_iterations_comparison_f32.pdf", format="pdf", bbox_inches="tight")
 
 
 if __name__ == "__main__":

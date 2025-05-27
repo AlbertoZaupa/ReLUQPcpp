@@ -1,15 +1,15 @@
 import numpy as np
 import torch
-import scipy
 import scipy.sparse as sparse
 from reluqp import ReLU_QP
-from solver_wrapper import CppSolver
+from gpusolver.wrapper import GpuSolver
 import osqp
-from utils import qp_initialization
+from examples.utils import qp_initialization
 
 class RHC_controller():
     
-    def __init__(self, x0, A, B, K, Q, R, Pf, N, Ex, dx, cx, Eu, du, cu, Ef, df, cf):
+    def __init__(self, x0, A, B, K, Q, R, Pf, N, Ex, dx, cx, Eu, du, cu, Ef, df, cf, verbose=False):
+        self.verbose = verbose
         self.K = K
         self.condense(A, B, Q, R, Pf, N, Ex, dx, cx, Eu, du, cu, Ef, df, cf)
         self.g = (self.M @ x0).reshape(-1)
@@ -90,8 +90,8 @@ class RHC_controller():
 
 class ReLUQP_controller(RHC_controller):
 
-    def __init__(self, x0, A, B, K, Q, R, Pf, N, Ex, dx, cx, Eu, du, cu, Ef, df, cf):
-        super().__init__(x0, A, B, K, Q, R, Pf, N, Ex, dx, cx, Eu, du, cu, Ef, df, cf)
+    def __init__(self, x0, A, B, K, Q, R, Pf, N, Ex, dx, cx, Eu, du, cu, Ef, df, cf, verbose=False):
+        super().__init__(x0, A, B, K, Q, R, Pf, N, Ex, dx, cx, Eu, du, cu, Ef, df, cf, verbose)
         self.solver = ReLU_QP()
         self.solver.setup(self.H, self.g, self.E, self.l, self.upp, precision=torch.float32)
 
@@ -105,18 +105,22 @@ class ReLUQP_controller(RHC_controller):
             self.l = self.c - const
             self.solver.update(g=self.g, l=self.l, u=self.upp)
         result = self.solver.solve()
-        print(f"ReLUQP solver iterations: {result.info.iter}")
-        self.solve_time += result.info.solve_time
-        if result.info.solve_time > self.worst_case_time:
-            self.worst_case_time = result.info.solve_time
-            self.worst_case_time_iter = t
+        if self.verbose:
+            print(f"iterations: {result.info.iter}")
+            print(f"solve time: {result.info.solve_time}")
+        if t >= 2:
+            self.solve_time += result.info.solve_time
+            if result.info.solve_time > self.worst_case_time:
+                self.worst_case_time = result.info.solve_time
+                self.worst_case_time_iter = t
         return result.x[:self.nu].cpu().numpy()
 
 
 class OSQP_controller(RHC_controller):
-    def __init__(self, x0, A, B, K, Q, R, Pf, N, Ex, dx, cx, Eu, du, cu, Ef, df, cf):
-        super().__init__(x0, A, B, K, Q, R, Pf, N, Ex, dx, cx, Eu, du, cu, Ef, df, cf)
+    def __init__(self, x0, A, B, K, Q, R, Pf, N, Ex, dx, cx, Eu, du, cu, Ef, df, cf, verbose=False):
+        super().__init__(x0, A, B, K, Q, R, Pf, N, Ex, dx, cx, Eu, du, cu, Ef, df, cf, verbose)
         self.solver = osqp.OSQP()
+        print(sparse.csc_matrix(self.E).nnz)
         self.solver.setup(P=sparse.csc_matrix(self.H), q=self.g, A=sparse.csc_matrix(self.E), l=self.l, u=self.upp, eps_abs=1e-3, eps_rel=0, verbose=False)
 
     def solve(self, t, x0=None):
@@ -129,7 +133,9 @@ class OSQP_controller(RHC_controller):
             self.l = self.c - const
             self.solver.update(q=self.g, l=self.l, u=self.upp)
         result = self.solver.solve()
-        #print(f"OSQP solver iterations: {result.info.iter}")
+        if self.verbose:
+            print(f"iterations: {result.info.iter}")
+            print(f"solve time: {result.info.solve_time}")
         self.solve_time += result.info.solve_time
         if result.info.solve_time > self.worst_case_time:
             self.worst_case_time = result.info.solve_time
@@ -137,11 +143,11 @@ class OSQP_controller(RHC_controller):
         return result.x[:self.nu]
 
 
-class CppSolver_controller(RHC_controller):
-    def __init__(self, x0, A, B, K, Q, R, Pf, N, Ex, dx, cx, Eu, du, cu, Ef, df, cf):
-        super().__init__(x0, A, B, K, Q, R, Pf, N, Ex, dx, cx, Eu, du, cu, Ef, df, cf)
+class GpuSolver_controller(RHC_controller):
+    def __init__(self, x0, A, B, K, Q, R, Pf, N, Ex, dx, cx, Eu, du, cu, Ef, df, cf, verbose=False):
+        super().__init__(x0, A, B, K, Q, R, Pf, N, Ex, dx, cx, Eu, du, cu, Ef, df, cf, verbose)
         T, eigs, M, M_inv = qp_initialization(self.H, self.E, self.l, self.upp)
-        self.solver = CppSolver(0.1, self.H.shape[0], self.E.shape[0], self.H, self.E, T, M, M_inv, self.g, self.l, self.upp, eigs)
+        self.solver = GpuSolver(0.1, self.H.shape[0], self.E.shape[0], self.H, self.E, T, M, M_inv, self.g, self.l, self.upp, eigs)
         self.solver.setup()
 
     def solve(self, t, x0=None):
@@ -155,9 +161,10 @@ class CppSolver_controller(RHC_controller):
             self.solver.update(g=self.g, l=self.l, u=self.upp, rho=-1)
         result = self.solver.solve()
         self.solve_time += result.info.solve_time
-        print(f"CppSolver iterations: {result.info.iter}")
-        print(f"CppSolver solve time: {result.info.solve_time}")
+        if self.verbose:
+            print(f"iterations: {result.info.iter}")
+            print(f"solve time: {result.info.solve_time}")
         if result.info.solve_time > self.worst_case_time:
             self.worst_case_time = result.info.solve_time
             self.worst_case_time_iter = t
-        return result.info.x_sol[:self.nu]
+        return result.x[:self.nu]

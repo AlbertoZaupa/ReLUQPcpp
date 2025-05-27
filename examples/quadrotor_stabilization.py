@@ -1,4 +1,4 @@
-import RHC_controllers
+from .RHC_controllers import *
 import numpy as np
 import matplotlib.pyplot as plt
 import argparse
@@ -41,10 +41,13 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description="Run controller with a solver flag.")
     parser.add_argument("--solver", type=str, required=True, help="Solver flag value (string).")
     parser.add_argument("--plot", type=int, required=True, help="Plot flag value (int).")
+    parser.add_argument("--n", type=int, required=True, help="Horizon length (int).")
+    parser.add_argument("--verbose", type=int, required=True, help="Verbose (int).")
     args = parser.parse_args()
     SOLVER_FLAG = args.solver  # Use the passed argument
     PLOT_FLAG = args.plot != 0
-    assert SOLVER_FLAG in ["reluqp", "osqp", "cppsolver", "reluqp_warm"]
+    VERBOSE_FLAG = args.verbose != 0
+    assert SOLVER_FLAG in ["reluqp", "osqp", "gpusolver", "gpusolver_1", "cpusolver", "reluqp_warm"]
 
     g = 9.81
     m = 1.5
@@ -53,7 +56,7 @@ if __name__ == '__main__':
     l = 0.225
     c = 0.015
     dt = 0.01
-    N = 50
+    N = args.n
 
     def quadrotor_dynamics(state, inputs):
         T = np.sum(inputs)
@@ -144,15 +147,15 @@ if __name__ == '__main__':
     u_const = np.ones(4) * m * g / 4
     controller_class = None
     if SOLVER_FLAG in ["reluqp", "reluqp_warm"]:
-        controller_class = RHC_controllers.ReLUQP_controller
+        controller_class = ReLUQP_controller
     elif SOLVER_FLAG == "osqp":
-        controller_class = RHC_controllers.OSQP_controller
-    elif SOLVER_FLAG == "cppsolver":
-        controller_class = RHC_controllers.CppSolver_controller
+        controller_class = OSQP_controller
+    elif SOLVER_FLAG == "gpusolver":
+        controller_class = GpuSolver_controller
     
     solve_times = []
     controller = controller_class(x0, A, B, K, Q, R, Pf, N, Ex,
-                                            dx, cx, Eu, du, cu, Ef, df, cf)
+                                            dx, cx, Eu, du, cu, Ef, df, cf, VERBOSE_FLAG)
     x_t = x0.copy()
 
     for t in range(M):
@@ -171,11 +174,10 @@ if __name__ == '__main__':
         x_t = rk4(quadrotor_dynamics, x_t, u_t, dt)
     
     if SOLVER_FLAG == "reluqp_warm":
-        print(f"{SOLVER_FLAG} average solve time: {(controller.solve_time - controller.worst_case_time) / (M - 1)}\n")
+        print(f"average solve time: {(controller.solve_time) / (M - 2)}")
     else:
-        print(f"{SOLVER_FLAG} average solve time: {controller.solve_time / M}\n")
-    print(f"{SOLVER_FLAG} worst case solve time: {controller.worst_case_time}\n")
-    #print(f"{SOLVER_FLAG} worst case solve time iteration: {controller.worst_case_time_iter}\n")
+        print(f"average solve time: {controller.solve_time / M}")
+    print(f"worst case time: {controller.worst_case_time}")
 
 
     if PLOT_FLAG:

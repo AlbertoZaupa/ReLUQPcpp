@@ -4,7 +4,7 @@ This repository contains the ReLU-QP solver proposed in "Improved GPU accelerati
 
 ## Setup instructions
 
-This setup intructions assume that the user has an CUDA-capable GPU installed in the system, along with the correct drivers and the CUDA Toolkit. The code was tested with CUDA 11.6 on machines with Ubuntu 24.04 and Ubuntu 22.04, using Intel CPUs paired with an RTX 3060M and RTX 5000 Ada Gen GPUs, respectively. The solver was also tested running natively on an Nvidia Jetson Orin NX 16GB.
+This setup intructions assume that the user has an CUDA-capable GPU installed in the system, along with the correct drivers and the CUDA Toolkit. The code was tested with CUDA 11.6 on machines with Ubuntu 24.04 and Ubuntu 22.04, using Intel CPUs paired with an RTX 3060M and RTX 5000 Ada Gen GPUs, respectively. The solver was also tested running natively on an Nvidia Jetson Xavier 16GB.
 
 ### Prerequisites
 
@@ -26,7 +26,7 @@ docker build -t cuda-admm .
 ## Running the Docker Container  
 To start the container with GPU support and mount the `results` directory, use:  
 ```bash
-docker run --gpus all -it --rm -v ./results:/shared cuda-admm bash
+docker run --gpus all -it --rm -v ./examples/results:/shared cuda-admm bash
 ```
 
 ## Running Benchmarks Inside the Container  
